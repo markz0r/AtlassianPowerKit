@@ -5,7 +5,7 @@
 ## Quick Start
 
 ```powershell
-git clone 
+git clone https://github.com/markz0r/AtlassianCloud-PowerKit.git
 cd .\AtlassianCloud-PowerKit; Import-Module "AtlassianCloud-PowerKit.psd1" -Force
 ```
 ## Usage
