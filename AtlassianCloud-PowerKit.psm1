@@ -5,12 +5,10 @@
     Atlassian Cloud PowerKit module for interacting with Atlassian Cloud REST API.
     - Dependencies: AtlassianCloud-PowerKit-Shared
     - Functions:
-        - Get-PowerKitFunctions
-        - Get-PowerKitModules
-        - Get-DefinedPowerKitVariables
+      - Use-AtlassianCloud-PowerKit: Interactive function to run any function in the module.
     - Debug output is enabled by default. To disable, set $DisableDebug = $true before running functions.
 .EXAMPLE
-    Get-PowerKitFunctions
+    Use-AtlassianCloudPowerKit
     This example lists all functions in the AtlassianCloud-PowerKit module.
 .EXAMPLE
     Get-PowerKitModules
@@ -24,7 +22,7 @@
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 
-function Get-PowerKitFunctions {
+function Use-AtlassianCloudPowerKit {
     # List nested modules and their exported functions to the console in a readable format, grouped by module
     $colors = @('Green', 'Cyan', 'Red', 'Magenta', 'Yellow')
     $nestedModules = Get-Module -Name AtlassianCloud-PowerKit | Select-Object -ExpandProperty NestedModules
@@ -79,7 +77,7 @@ function Get-PowerKitFunctions {
         return
     }
     $selectedFunction = [char]$selectedFunction
-    write-host "`n"
+    Write-Host "`n"
     Write-Host "You selected: $selectedFunction"
     if ([string]::IsNullOrEmpty($selectedFunction)) {
         return
@@ -109,7 +107,7 @@ function Get-PowerKitFunctions {
             Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -BackgroundColor Black -ForegroundColor DarkGre
             $runAnother = Read-Host 'Run another function? (Y/N)'
             if ($runAnother -eq 'Y') {
-                Get-PowerKitFunctions
+                Use-AtlassianCloudPowerKit
             }
         }
         
@@ -119,6 +117,6 @@ function Get-PowerKitFunctions {
     }
 }
 
-function Get-PowerKitModules {
+function Get-PowerKitModule {
     Get-Module -Name AtlassianCloud-PowerKit -ListAvailable
 }

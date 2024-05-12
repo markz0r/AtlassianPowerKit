@@ -97,7 +97,7 @@ function Get-OpsgenieAPIEndpoint {
 # Function to list all global variables and values where names start with PK_
 function Get-PowerKitVariables {
     Get-Variable -Name 'PK_*' | ForEach-Object {
-        Write-Host "$($_.Name): $($_.Value)"
+        Write-Debug "$($_.Name): $($_.Value)"
     }
 }
 

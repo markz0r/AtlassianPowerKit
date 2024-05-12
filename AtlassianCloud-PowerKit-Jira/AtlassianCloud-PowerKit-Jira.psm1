@@ -144,6 +144,76 @@ function Get-JiraIssueChangeNullsFromJQL {
         Get-JiraIssueChangeNulls -Key $_.key
     }
 }
+# Function to list all JSON fields in a JSON object array only if the field contains a value that is not null in at least one object, include example of the field value, don't repeat the field name
+function Get-JSONFieldsWithData {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$JSON_FILE_PATH
+    )
+    $EXCLUDED_FIELDS = @('Time to resolution', 'Time to first response', 'customfield_10062', 'assignee', 'aggregatetimeoriginalestimate', 'aws-json-field__ad4c4b0c-406f-47c1-a8e3-df46e38dabf2', 'customfield_10291', 'customfield_10292', 'customfield_10294', 'customfield_10295', 'reporter' )
+    $DATA_FIELD_LIST = @{}
+    $JSON_OBJECT = Get-Content -Path $JSON_FILE_PATH | ConvertFrom-Json -Depth 30
+    # Write a sub-function that gets all fields in a JSON object array that are not null, adding the field to a hash table with key as the field name and value as the field value, if the key already exists, skip, the function takes a JSON object array as a parameter if the field is an object, write the field name and object type is an object, if the field is an array, write the field name and object type is an array, call self with the array as a parameter
+    function Search-JSONObjectArray {
+        param (
+            [Parameter(Mandatory = $true)]
+            [object]$JSON_OBJECT
+        )
+        $JSON_OBJECT | ForEach-Object {
+            $OBJECT = $_
+            $OBJECT.PSObject.Properties | ForEach-Object {
+                if ($null -eq $_.Value -or $_.Key -in $EXCLUDED_FIELDS -or $_.Name -in $EXCLUDED_FIELDS) {
+                    return
+                }
+                if ($_.Value -is [object]) {
+                    if ($_.Value -is [array]) {
+                        #Write-Debug "Field: $($_.Name) - Type: array"
+                        Search-JSONObjectArray -JSON_OBJECT $_.Value
+                    }
+                    else {
+                        #Write-Debug "Field: $($_.Name) - Type: object"
+                        Search-JSONObjectArray -JSON_OBJECT $_.Value
+                    }
+                }
+                else {
+                    if (-not $DATA_FIELD_LIST.ContainsKey($_.Name)) {
+                        $DATA_FIELD_LIST[$_.Name] = $_.Value
+                    }
+                }
+            }
+        }
+    }
+    Search-JSONObjectArray -JSON_OBJECT $JSON_OBJECT
+    Write-Debug 'Fields with data:'
+    $DATA_FIELD_LIST.GetEnumerator() | ForEach-Object {
+        Write-Debug "$($_.Key): $($_.Value)"
+    }
+}
+
+
+
+# Function to remove fields from JSON object array, writing a filtered JSON object array to a file, fields to retain as an array parameter
+function Select-JSONExportDataFields {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$JSON_FILE_PATH,
+        [Parameter(Mandatory = $true)]
+        [string[]]$FIELDS_TO_RETAIN
+    )
+    $JSON_OBJECT = Get-Content -Path $JSON_FILE_PATH | ConvertFrom-Json -Depth 30
+    $JSON_FILE_PATH = $JSON_FILE_PATH -replace '.json', '-Filtered.json'
+    $JSON_OBJECT | ForEach-Object {
+        $OBJECT = $_
+        $OBJECT.PSObject.Properties | ForEach-Object {
+            if (-not $FIELDS_TO_RETAIN.Contains($_.Name)) {
+                $OBJECT.PSObject.Properties.Remove($_.Name)
+            }
+        }
+
+    }
+    $JSON_OBJECT | ConvertTo-Json -Depth | Out-File -FilePath $JSON_FILE_PATH
+}
+
 
 # Function to Export all Get-JiraCloudJQLQueryResults to a JSON file
 function Export-JiraCloudJQLQueryResultsToJSON {
@@ -154,6 +224,15 @@ function Export-JiraCloudJQLQueryResultsToJSON {
         [string]$JSON_FILE_PATH
     )
     Get-AtlassianCloudAPIEndpoint
+    $JIRA_FIELDS = Get-JiraFields
+    $JIRA_FIELDS | ForEach-Object {
+        Write-Debug "id: $($_.id), key: $($_.key), name: $($_.name)"
+    }
+    # Create a hash table of Jira fields with the field key as the key and the field name as the value
+    $JIRA_FIELD_MAPS = @{}
+    $JIRA_FIELDS | ForEach-Object {
+        $JIRA_FIELD_MAPS[$_.id] = $_.name
+    }
     # Get the JQL query results and provide the JSON file path if it is defined
     Write-Debug 'Exporting JQL query results to JSON'
     # Advise the user if the JSON file path is not defined so only the results are displayed
@@ -167,7 +246,7 @@ function Export-JiraCloudJQLQueryResultsToJSON {
     }
     Write-Debug "JQL Query: $JQL_STRING running..."
     # wait for Get-JiraCloudJQLQueryResults -JQL_STRING $JQL_STRING -JSON_FILE_PATH $JSON_FILE_PATH to complete and return the results to $REST_RESULTS
-    $REST_RESULTS = Get-JiraCloudJQLQueryResults -JQL_STRING $JQL_STRING -JSON_FILE_PATH $JSON_FILE_PATH
+    $REST_RESULTS = Get-JiraCloudJQLQueryResults -JQL_STRING $JQL_STRING -JSON_FILE_PATH $JSON_FILE_PATH -JIRA_FIELD_MAPS $JIRA_FIELD_MAPS
     
     Write-Debug "Total Results: $($REST_RESULTS.total), export complete."
 }
@@ -177,7 +256,9 @@ function Get-JiraCloudJQLQueryResultsPages {
         [Parameter(Mandatory = $true)]
         [string]$P_BODY_JSON,
         [Parameter(Mandatory = $false)]
-        [string]$JSON_FILE_PATHNAME
+        [string]$JSON_FILE_PATHNAME,
+        [Parameter(Mandatory = $false)]
+        [System.Object]$JIRA_FIELD_MAPS
     )
     $ISSUES = Invoke-RestMethod -Uri "https://$global:PK_AtlassianCloudAPIEndpoint/rest/api/3/search" -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Post -Body $P_BODY_JSON -ContentType 'application/json'
     # Backoff if the API returns a 429 status code
@@ -189,8 +270,36 @@ function Get-JiraCloudJQLQueryResultsPages {
     Write-Debug "Total: $($ISSUES.total) - Collecting issues: $($P_BODY.startAt) to $($P_BODY.startAt + 100)..."
     if ($ISSUES.issues -and $JSON_FILE_PATHNAME) {
         Write-Debug "Exporting $P_BODY.startAt plus $P_BODY.maxResults to $JSON_FILE_PATHNAME"
-        $ISSUES.issues | Select-Object -Property key, fields | ConvertTo-Json -Depth 10 | Out-File -FilePath "$JSON_FILE_PATHNAME"
+        # Replace the field key with the field name in the JSON object
+        function Convert-FieldKeyToName {
+            param (
+                [Parameter(Mandatory = $true)]
+                [System.Object]$FIELD_OBJECT,
+                [Parameter(Mandatory = $true)]
+                [System.Object]$JIRA_FIELD_MAPS
+            )
+            $OUT_KEY = $FIELD_OBJECT.Key
+            if ($JIRA_FIELD_MAPS.ContainsKey($FIELD_KEY)) {
+                $OUT_KEY = $JIRA_FIELD_MAPS[$FIELD_KEY]
+            }
+            return @{ $OUT_KEY = $FIELD_OBJECT.Value }
+        }
+        $ISSUES.issues | ForEach-Object {
+            $ISSUE = $_
+            $ISSUE.fields | ForEach-Object {
+                $FIELD_KEY = $_.Key
+                if ($JIRA_FIELD_MAPS.ContainsKey($FIELD_KEY)) {
+                    $_.FieldName = $JIRA_FIELD_MAPS[$FIELD_KEY]
+                }
+            }
+        }
+        $ISSUE = $($ISSUES.issues | Select-Object -Property key, fields)
+        # Write the issue object to terminal displaying all fields
+        
+        $ISSUE_JSON = $ISSUES.issues | Select-Object -Property key, fields | ConvertTo-Json -Depth 30
+
     }
+    #Out-File -FilePath "$JSON_FILE_PATHNAME"
     $ISSUES
 }
 
@@ -201,7 +310,9 @@ function Get-JiraCloudJQLQueryResults {
         [Parameter(Mandatory = $true)]
         [string]$JQL_STRING,
         [Parameter(Mandatory = $false)]
-        [string]$JSON_FILE_PATH
+        [string]$JSON_FILE_PATH,
+        [Parameter(Mandatory = $false)]
+        [System.Object]$JIRA_FIELD_MAPS
     )
 
     Get-AtlassianCloudAPIEndpoint
@@ -269,7 +380,7 @@ function Get-JiraCloudJQLQueryResults {
         $P_BODY_JSON = $POST_BODY | ConvertTo-Json
         Write-Debug "Getting Jira Cloud JQL Query Results Pages... P_BODY_JSON: $P_BODY_JSON, JSON_FILE_PATHNAME: $jsonFilePath"
         $jobs += Start-Job -ScriptBlock {
-            $ISSUES = Invoke-RestMethod -Uri "https://$($args[2])/rest/api/3/search" -Headers $args[3] -Method Post -Body $args[0] -ContentType 'application/json'
+            $ISSUES = Invoke-RestMethod -Uri "https://$($args[2])/rest/api/3/search?expand=names" -Headers $args[3] -Method Post -Body $args[0] -ContentType 'application/json'
             if ($ISSUES.statusCode -eq 429) {
                 Write-Debug 'API Rate Limit Exceeded. Waiting for 60 seconds...'
                 Start-Sleep -Seconds 20
@@ -404,12 +515,13 @@ function Get-JiraIssueChangeNulls {
     }
 }
 
-# Function to create a custom field in Jira Cloud
-# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-fields/#api-rest-api-3-field-post
-# Type for OSMEntity is "com.atlassian.jira.plugin.system.customfieldtypes:cascadingselectsearcher"
-# # cascadingselectsearcher
+# Function to list fields with field ID and field name for a Jira Cloud instance
 function Get-JiraFields {
-
+    Get-AtlassianCloudAPIEndpoint
+    $REST_RESULTS = Invoke-RestMethod -Uri "https://$global:PK_AtlassianCloudAPIEndpoint/rest/api/3/field" -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Get -ContentType 'application/json'
+    #Write-Debug $REST_RESULTS.getType()
+    #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+    return $REST_RESULTS
 }
 
 # Function to create a custom field in Jira Cloud
@@ -499,7 +611,7 @@ function Get-OpsgenieServices {
             $REST_RESULTS = Invoke-RestMethod -Uri "$OPSGENIE_SERVICES_ENDPOINT$OFFSET" -Headers $global:PK_OpsgenieDefaultAPIHeaders -Method Get -ContentType 'application/json'
             $REST_RESULTS.data | ForEach-Object {
                 # Append to file { "id": "$_.id", "name": "$_.name"} ensuring double quotes are used
-                $OUTPUT_FILE_CONTENT = "{ `"id`": `"$($_.id)`", `"name`": `"$($_.name)`"},"
+                $OUTPUT_FILE_CONTENT = "{ `"id`": `"$($_.id)`", `"name`": `"$($_.name)`" }, "
                 $OUTPUT_FILE_CONTENT | Out-File -FilePath $OUTPUT_FILE -Append
             }
             #$REST_RESULTS | ConvertTo-Json -Depth 10 | Write-Debug

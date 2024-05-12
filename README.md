@@ -11,7 +11,7 @@ cd .\AtlassianCloud-PowerKit; Import-Module "AtlassianCloud-PowerKit.psd1" -Forc
 ## Usage
 
 ```powershell
- Get-PowerKitFunctions
+ Use-AtlassianCloudPowerKit
 ```
 
 ## Prerequisites
