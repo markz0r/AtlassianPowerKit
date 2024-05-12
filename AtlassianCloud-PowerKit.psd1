@@ -49,22 +49,15 @@
 
     # Processor architecture (None, X86, Amd64) required by this module
     # ProcessorArchitecture = ''
-
+    
     # Modules that must be imported into the global environment prior to importing this module
-    # RequiredModules = @()
-
-    # Assemblies that must be loaded prior to importing this module
-    # RequiredAssemblies = @()
-
-    # Script files (.ps1) that are run in the caller's environment prior to importing this module.
-    # ScriptsToProcess = @()
-
-    # Type files (.ps1xml) to be loaded when importing this module
-    # TypesToProcess = @()
-
-    # Format files (.ps1xml) to be loaded when importing this module
-    # FormatsToProcess = @()
-
+    RequiredModules   = @(
+        '.\AtlassianCloud-PowerKit-Shared\AtlassianCloud-PowerKit-Shared.psd1',
+        '.\AtlassianCloud-PowerKit-Confluence\AtlassianCloud-PowerKit-Confluence.psd1',
+        '.\AtlassianCloud-PowerKit-UsersAndGroups\AtlassianCloud-PowerKit-UsersAndGroups.psd1',
+        '.\AtlassianCloud-PowerKit-Jira\AtlassianCloud-PowerKit-Jira.psd1'
+    )
+        
     # Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
     NestedModules     = @(
         '.\AtlassianCloud-PowerKit-Shared\AtlassianCloud-PowerKit-Shared.psd1',
@@ -72,6 +65,18 @@
         '.\AtlassianCloud-PowerKit-UsersAndGroups\AtlassianCloud-PowerKit-UsersAndGroups.psd1',
         '.\AtlassianCloud-PowerKit-Jira\AtlassianCloud-PowerKit-Jira.psd1'
     )
+    # Assemblies that must be loaded prior to importing this module
+    # RequiredAssemblies = @()
+        
+    # Script files (.ps1) that are run in the caller's environment prior to importing this module.
+    # ScriptsToProcess = @()
+        
+    # Type files (.ps1xml) to be loaded when importing this module
+    # TypesToProcess = @()
+
+    # Format files (.ps1xml) to be loaded when importing this module
+    # FormatsToProcess = @()
+
 
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.

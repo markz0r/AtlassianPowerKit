@@ -2,6 +2,13 @@
 
 - Various functions in PowerShell to interact with JIRA Cloud APIs
 
+## TODO
+- Completed PowerShell SecretManagement Implementation 
+ - https://github.com/PowerShell/SecretManagement/tree/main
+
+## Maybe
+- 1password vault integration
+
 ## Quick Start
 
 ```powershell

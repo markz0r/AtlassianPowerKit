@@ -5,15 +5,15 @@
 .DESCRIPTION
     Atlassian Cloud PowerShell Module - Users and Groups
     - Dependencies: AtlassianCloud-PowerKit-Shared
-        - Set-AtlassianCloudAPIEndpoint
+        - New-AtlassianCloudAPIEndpoint
     - Users and Groups Module Functions
         - Get-AtlassianGroupMembers
         - Get-AtlassianCloudUser
-        - Get-JiraCloudJSMProjectRoles
+        - Show-JiraCloudJSMProjectRole
     - To list all functions in this module, run: Get-Command -Module AtlassianCloud-PowerKit-UsersAndGroups
     - Debug output is enabled by default. To disable, set $DisableDebug = $true before running functions.
 
-.EXAMPLE 
+.EXAMPLE
     Get-AtlassianGroupMembers -GROUP_NAME 'jira-administrators'
 
     This example gets all members of the 'jira-administrators' group.
@@ -24,7 +24,7 @@
     This example gets the user details for the account ID '5f7b7f7d7f7f7f7f7f7f7f7f7'.
 
 .EXAMPLE
-    Get-JiraCloudJSMProjectRoles -JiraCloudJSMProjectKey 'OSM'
+    Show-JiraCloudJSMProjectRole -JiraCloudJSMProjectKey 'OSM'
 
     This example gets all roles for the Jira Service Management (JSM) project with the key 'OSM'.
 
@@ -52,7 +52,7 @@ function Get-AtlassianGroupMembers {
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
     catch {
-        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__ 
+        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
         Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
     }
 }
@@ -74,13 +74,13 @@ function Get-AtlassianCloudUser {
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
     catch {
-        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__ 
+        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
         Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
     }
 }
 
 # Function to list all roles for a JSM cloud project
-function Get-JiraCloudJSMProjectRoles {
+function Show-JiraCloudJSMProjectRole {
     param (
         [Parameter(Mandatory = $true)]
         [string]$JiraCloudJSMProjectKey
