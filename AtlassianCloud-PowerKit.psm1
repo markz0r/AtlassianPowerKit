@@ -26,6 +26,16 @@ $script:LOADED_PROFILE = @{}
 
 $script:AtlassianPowerKitRequiredModules = @('Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
 
+function Set-LoadedProfileForNestedModules {
+    $nestedModules = Get-Module -Name AtlassianCloud-PowerKit | Select-Object -ExpandProperty NestedModules | Where-Object Name -Match 'AtlassianCloud-PowerKit-.*'
+    $nestedModules | ForEach-Object {
+        $_.ExportedCommands.Keys | Where-Object { $_ -eq 'Set-LoadedProfile*' } | ForEach-Object { 
+            Write-Debug "Setting loaded profile for nested module: $($_.Name)"
+            Invoke-Expression $_.Name -PROFILE $script:LOADED_PROFILE
+        }
+    }
+}
+
 function Get-RequisitePowerKitModules {
     $script:AtlassianPowerKitRequiredModules | ForEach-Object {
         # Import or install the required module
@@ -45,10 +55,10 @@ function Get-RequisitePowerKitModules {
     }
 }
 # Function display console interface to run any function in the module
-function Show-AtlassionCloudPowerKitFunctions {
+function Show-AtlassianCloudPowerKitFunctions {
     # List nested modules and their exported functions to the console in a readable format, grouped by module
     $colors = @('Green', 'Cyan', 'Red', 'Magenta', 'Yellow')
-    $nestedModules = Get-Module -Name AtlassianCloud-PowerKit | Select-Object -ExpandProperty NestedModules
+    $nestedModules = Get-Module -Name AtlassianCloud-PowerKit | Select-Object -ExpandProperty NestedModules | Where-Object Name -Match 'AtlassianCloud-PowerKit-.*'
 
     $colorIndex = 0
     $functionReferences = @{}
@@ -90,94 +100,98 @@ function Show-AtlassionCloudPowerKitFunctions {
     Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -BackgroundColor Black -ForegroundColor DarkGray
     # Ask the user which function they want to run
     $selectedFunction = Read-Host -Prompt "`nSelect a function to run (or hit enter to exit):"
-    $selectedFunction = $selectedFunction.Trim().ToUpper()
     # Attempt to convert the input string to a char
     try {
         $selectedFunction = [char]$selectedFunction
     }
     catch {
+        if ([string]::IsNullOrEmpty($selectedFunction)) {
+            exit 0
+        }
         Write-Host 'Invalid selection. Please try again.'
-        return
+        Show-AtlassianCloudPowerKitFunctions
     }
-    $selectedFunction = [char]$selectedFunction
+    # Run the selected function timing the execution
     Write-Host "`n"
     Write-Host "You selected: $selectedFunction"
-    if ([string]::IsNullOrEmpty($selectedFunction)) {
-        return
+    try {
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        Invoke-Expression $functionReferences[$selectedFunction]
+        $stopwatch.Stop()
     }
-    elseif ($functionReferences.ContainsKey($selectedFunction)) {
-        # Run the selected function timing the execution
-        try {
-            $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-            Invoke-Expression $functionReferences[$selectedFunction]
-            $stopwatch.Stop()
-        }
-        catch {
-            # Write all output including errors to the console from the selected function
-            Write-Host $_.Exception.Message -ForegroundColor Red
-            throw "Error running function: $functionReferences[$selectedFunction] failed. Exiting."
-            # Exit with an error code
-            exit 1
-        }
-        finally {
-            # Ask the user if they want to run another function
-            # Write success separator
-            Write-Host "`n" -BackgroundColor Black
-            Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -BackgroundColor Black -ForegroundColor DarkGreen
-            Write-Host "`n"
-            $message = "Success! --> **$($functionReferences[$selectedFunction])** completed at $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) taking $($stopwatch.Elapsed.TotalSeconds) seconds."
-            Write-Host ($message | ConvertFrom-Markdown -AsVT100EncodedString).VT100EncodedString -BackgroundColor Black -ForegroundColor DarkGreen
-            Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -BackgroundColor Black -ForegroundColor DarkGre
-            $runAnother = Read-Host 'Run another function? (Y/N)'
-            if ($runAnother -eq 'Y') {
-                Use-AtlassianCloudPowerKit
-            }
-        }
-
+    catch {
+        # Write all output including errors to the console from the selected function
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        throw "Error running function: $functionReferences[$selectedFunction] failed. Exiting."
+        # Exit with an error code
+        exit 1
+    }
+    finally {
+        # Ask the user if they want to run another function
+    }   if ($runAnother -eq 'Y') {
+        Get-PowerKitFunctions
     }
     else {
-        Write-Host 'Invalid selection. Please try again.'
+        Write-Host 'Have a great day!'
+        exit 0
     }
 }
+
+# Function to create a new profile
+function New-AtlassianCloudPowerKitProfile {
+    # Ask user to enter the profile name
+    $ProfileName = Read-Host 'Enter a profile name:'
+    $ProfileName = $ProfileName.ToLower().Trim()
+    if (!$ProfileName -or $ProfileName -eq '' -or $ProfileName.Length -gt 100) {
+        Write-Error 'Profile name cannot be empty, or more than 100 characters, Please try again.'
+        # Load the selected profile or create a new profile
+        Write-Debug "Profile name entered: $ProfileName"
+        Throw 'Profile name cannot be empty, taken or mor than 100 characters, Please try again.'
+    }
+    else {
+        try {
+            Register-AtlassianCloudPowerKitProfile($ProfileName)       
+        }
+        catch {
+            Write-Debug "Error: $($_.Exception.Message)"
+            throw "Register-AtlassianCloudPowerKitProfile $ProfileName failed. Exiting."
+        }
+    }
+}
+
 # Function to list availble profiles with number references for interactive selection or 'N' to create a new profile
 function Show-AtlassianCloudPowerKitProfileList {
     $profileIndex = 0
-    $script:AtlassianCloudProfiles | ForEach-Object {
-        Write-Host "[$profileIndex] $_"
-        $profileIndex++
-    }
-    # Read the user input
     if ($script:AtlassianCloudProfiles.Count -eq 0) {
         Write-Host 'No profiles found. Please create a new profile.'
-    }
-    Write-Host '[N] Create a new profile'
-    $selectedProfile = Read-Host 'Select a profile to use or create a new profile:'
-    # Load the selected profile or create a new profile
-    if ($selectedProfile -eq 'N') {
-        Write-Debug 'Calling function to create a new profile.'
-        # Ask user to enter the profile name
-        $PROF_INPUT_NAME = Read-Host 'Enter a profile name:'
-        $PROF_INPUT_NAME = [string]$PROF_INPUT_NAME.Trim().ToLower()
-        Write-Debug "Profile name entered: $PROF_INPUT_NAME"
-        if (!$PROF_INPUT_NAME -or $PROF_INPUT_NAME -eq '' -or $script:AtlassianCloudProfiles.Contains($PROF_INPUT_NAME) -or $PROF_INPUT_NAME.Length -gt 100) {
-            Write-Error 'Profile name cannot be empty, taken or mor than 100 characters, Please try again.'
-        }
-        else {
-            if (Register-AtlassianCloudPowerKitProfile -ProfileName $PROF_INPUT_NAME) {
-                $script:AtlassianCloudProfiles = Get-AtlassianCloudPowerKitProfileList
-                Write-Host 'Profile created successfully... loading'
-                Set-AtlassianCloudPowerKitProfile -ProfileName $PROF_INPUT_NAME
-            }
-            else {
-                Write-Error 'Profile creation failed. Please try again.'
-            }
-        }
-    }
-    elseif ($selectedProfile -ge 0 -and $selectedProfile -lt $script:AtlassianCloudProfiles.Count) {
-        Set-AtlassianCloudPowerKitProfile -ProfileName $script:AtlassianCloudProfiles[$selectedProfile]
+        New-AtlassianCloudPowerKitProfile
     }
     else {
-        Write-Error 'Invalid selection. Please try again.'
+        # ensure $script:AtlassianCloudProfiles is an array
+        if ($script:AtlassianCloudProfiles -isnot [System.Array]) {
+            $script:AtlassianCloudProfiles = @($script:AtlassianCloudProfiles)
+        }
+        $script:AtlassianCloudProfiles | ForEach-Object {
+            Write-Host "[$profileIndex] $_"
+            $profileIndex++
+        }
+        Write-Host '[N] Create a new profile'
+        Write-Host '[Q] Quit'
+        Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -ForegroundColor DarkGray
+        $selectedProfile = Read-Host 'Select a profile to use or create a new profile'
+        if ($selectedProfile -eq 'N') {
+            New-AtlassianCloudPowerKitProfile
+        } 
+        elseif ($selectedProfile -eq 'Q') {
+            Write-Host 'Exiting...'
+            exit 0
+        }
+        else {
+            $selectedProfile = [int]$selectedProfile
+            Write-Debug "Selected profile index: $selectedProfile"
+            Write-Debug "Selected profile name: $($script:AtlassianCloudProfiles[$selectedProfile])"
+            Set-AtlassianCloudPowerKitProfile -ProfileName $script:AtlassianCloudProfiles.Item($selectedProfile)
+        }
     }
 }
 
@@ -201,9 +215,9 @@ function Use-AtlassianCloudPowerKit {
             Write-Host 'Profile not found. Check the profiles available.'
             Show-AtlassianCloudPowerKitProfileList
         }
-        Set-AtlassianCloudPowerKitProfile -ProfileName $ProfileName
     }
     $LOADED_PROFILE = Get-AtlassianCloudSelectedProfile
+    Set-LoadedProfileForNestedModules 
     Write-Host "Profile loaded: $($LOADED_PROFILE.PROFILE_NAME)"
-    Show-AtlassionCloudPowerKitFunctions
+    Show-AtlassianCloudPowerKitFunctions
 }

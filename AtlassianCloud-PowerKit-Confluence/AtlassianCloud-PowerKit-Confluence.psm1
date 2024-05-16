@@ -1,4 +1,12 @@
+$script:LOADED_PROFILE = @{}
 
+function Set-LoadedProfileConfluence {
+    param (
+        [Parameter(Mandatory = $true)]
+        [hashtable]$PROFILE
+    )
+    $script:LOADED_PROFILE = $PROFILE
+}
 
 # Function to create a mapping of Confluence spaces and their IDs, that is accessible to all functions
 function Get-ConfluenceSpaces {

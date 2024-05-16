@@ -34,6 +34,15 @@ GitHub: https://github.com/markz0r/AtlassianCloud-PowerKit
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
+$script:LOADED_PROFILE = @{}
+
+function Set-LoadedProfileUsersAndGroups {
+    param (
+        [Parameter(Mandatory = $true)]
+        [hashtable]$PROFILE
+    )
+    $script:LOADED_PROFILE = $PROFILE
+}
 
 # Get all users in a Group
 function Get-AtlassianGroupMembers {

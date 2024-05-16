@@ -33,6 +33,8 @@ GitHub: https://github.com/markz0r/AtlassianCloud-PowerKit
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 $script:AtlassianCloudPowerKitVaultName = 'AtlassianCloudPowerKitProfileVault'
+$script:vaultKeyPath = 'vault_key.xml'
+$script:vaultRegistered = $false
 $script:AtlassianCloudProfiles = @()
 $script:AtlassianCloudSelectedProfile = @{}
 $script:AtlassianCloudAPIHeaders = @{}
@@ -136,16 +138,27 @@ function Set-AtlassianCloudPowerKitProfile {
         [Parameter(Mandatory = $true)]
         [string]$ProfileName
     )
+    Write-Debug "Set-AtlassianCloudPowerKitProfile - with: $ProfileName ..."
     # Load all profiles from the secret vault
-    Get-AtlassianCloudPowerKitVault
+    if (!$script:vaultRegistered) {
+        Register-AtlassianCloudPowerKitVault
+    }
     # Check if the profile exists
-    if (!$script:AtlassianCloudProfiles.ContainsKey($ProfileName)) {
-        Write-Debug "Profile $ProfileName does not exists in the vault - we have: $($script:AtlassianCloudProfiles.Keys)"
+    Get-AtlassianCloudPowerKitProfileList
+    if (!$script:AtlassianCloudProfiles.Contains($ProfileName)) {
+        Write-Debug "Profile $ProfileName does not exists in the vault - we have: $script:AtlassianCloudProfiles"
         return $false
     }
     else {
         Write-Debug "Profile $ProfileName exists in the vault, loading..."
-        $script:AtlassianCloudSelectedProfile = Get-Secret -Name $ProfileName -Vault $script:AtlassianCloudPowerKitVaultName
+        try {
+            Unlock-Vault
+            $script:AtlassianCloudSelectedProfile = (Get-Secret -Name $ProfileName -Vault $script:AtlassianCloudPowerKitVaultName -AsPlainText)
+        } 
+        catch {
+            Write-Debug "Failed to load profile $ProfileName. Please check the vault key file."
+            throw "Failed to load profile $ProfileName. Please check the vault key file."
+        }
         Set-AtlassianCloudAPIHeaders -ProfileName $ProfileName
         Write-Debug "Profile $ProfileName loaded successfully."
         Write-Debug "Profile Data: $($script:AtlassianCloudSelectedProfile | Format-List * | Out-String)"
@@ -153,25 +166,82 @@ function Set-AtlassianCloudPowerKitProfile {
     return $true
 }
 
-# Function to load all AtlassianCloudPowerKit profiles from the secret vault
-function Get-AtlassianCloudPowerKitProfileList {
+function Unlock-Vault {
+    Write-Debug "Checking if vault $script:AtlassianCloudPowerKitVaultName is the default vault..."
+    if ((Get-SecretVault | Where-Object IsDefault).Name -ne $script:AtlassianCloudPowerKitVaultName) {
+        Write-Debug "$script:AtlassianCloudPowerKitVaultName is not the default vault. Setting as default..."
+        Set-SecretVault -Name $script:AtlassianCloudPowerKitVaultName -DefaultVault
+    }
+    Write-Debug "Unlocking vault $VaultName..."
+    try {
+        $vaultKey = Import-CliXml -Path $VaultKeyPath
+        Unlock-SecretStore -Password $vaultKey
+    }
+    catch {
+        Write-Debug "Failed to unlock vault $VaultName. Please check the vault key file."
+        throw "Failed to unlock vault $VaultName. Please check the vault key file."
+    }
+    Write-Debug "Vault $VaultName unlocked successfully."
+}
+
+function Register-AtlassianCloudPowerKitVault {
     # Register the secret vault
     # Cheking if the vault is already registered
-    if (-not (Get-SecretVault -Name $script:AtlassianCloudPowerKitVaultName -ErrorAction SilentlyContinue)) {
-        Write-Debug "No vault found called $script:AtlassianCloudPowerKitVaultName... Registering..."
-        Register-SecretVault -Name $script:AtlassianCloudPowerKitVaultName -ModuleName '.\AtlassianCloud-PowerKit-Shared\AtlassianCloud-PowerKit-Shared.psm1'
-        Write-Debug "Registered vault $script:AtlassianCloudPowerKitVaultName successfully."
+    if (-not (Test-Path $script:vaultKeyPath)) {
+        Write-Debug 'No vault key file found. Creating...'
+        $vaultKey = ConvertTo-SecureString -String $(New-StrongPassword 24 12) -AsPlainText -Force
+        $vaultKey | Export-Clixml -Path $script:vaultKeyPath
+        Write-Debug 'Vault key file created successfully.'
+    }
+    Write-Debug "Importing vault key from $script:vaultKeyPath..."
+    $vaultKey = Import-CliXml -Path $script:vaultKeyPath
+    Write-Debug 'Vault key imported successfully.'
+    if (Get-SecretVault -Name $script:AtlassianCloudPowerKitVaultName -ErrorAction SilentlyContinue) {
+        Write-Debug "Vault $script:AtlassianCloudPowerKitVaultName already exists."
     }
     else {
-        # If the vault is already registered, check if the vault is unlocked
-        if (-not (Get-SecretVault -Name $script:AtlassianCloudPowerKitVaultName).IsUnlocked) {
-            # If the vault is locked, unlock it
-            Unlock-SecretVault -Name $script:AtlassianCloudPowerKitVaultName
+        Write-Debug "Registering vault $script:AtlassianCloudPowerKitVaultName..."
+        Register-SecretVault -Name $script:AtlassianCloudPowerKitVaultName -ModuleName Microsoft.PowerShell.SecretStore -DefaultVault -AllowClobber
+        Write-Debug "Vault $script:AtlassianCloudPowerKitVaultName registered successfully."
+        Write-Debug "Checking if vault $script:AtlassianCloudPowerKitVaultName is the default vault..."
+        if ((Get-SecretVault | Where-Object IsDefault).Name -ne $script:AtlassianCloudPowerKitVaultName) {
+            Write-Debug "$script:AtlassianCloudPowerKitVaultName is not the default vault. Setting as default..."
+            Set-SecretVault -Name $script:AtlassianCloudPowerKitVaultName -DefaultVault
         }
+        Set-SecretStorePassword -NewPassword $vaultKey
+        else {
+            Write-Debug "$script:AtlassianCloudPowerKitVaultName is the default vault."
+        }
+        Write-Debug "Configuring vault $script:AtlassianCloudPowerKitVaultName..."
+        # Check for vault password file $script:vaultKeyPath
+        $storeConfiguration = @{
+            Authentication  = 'Password'
+            Password        = $vaultKey
+            PasswordTimeout = 3600
+            Interaction     = 'None'
+            Confirm         = $false
+        }
+        Set-SecretStoreConfiguration @storeConfiguration
+        Write-Debug "Vault $script:AtlassianCloudPowerKitVaultName configured successfully."
+        # if the vault is not the default vault, set it as default
     }
-    # for all profiles in the vault, load them into the AtlassianCloudProfiles variable
-    $script:AtlassianCloudProfiles = $(Get-SecretInfo -Vault $script:AtlassianCloudPowerKitVaultName).Name
-    return $script:AtlassianCloudProfiles
+    Write-Debug "Unlocking vault $script:AtlassianCloudPowerKitVaultName..."
+    try {
+        Unlock-SecretStore -Password $vaultKey
+    }
+    catch {
+        Write-Debug "Failed to unlock vault $script:AtlassianCloudPowerKitVaultName. Please check the vault key file."
+        Write-Debug "De-registering vault $script:AtlassianCloudPowerKitVaultName... and resetting vault key file."
+        Unregister-SecretVault -Name $script:AtlassianCloudPowerKitVaultName
+        Remove-Item -Path $script:vaultKeyPath -Force
+        Write-Debug "Vault $script:AtlassianCloudPowerKitVaultName de-registered and vault key file removed, starting from scratch..."
+        Register-AtlassianCloudPowerKitVault
+    }
+    Write-Debug "Vault $script:AtlassianCloudPowerKitVaultName unlocked successfully."
+    Write-Debug "Loading profiles from vault $script:AtlassianCloudPowerKitVaultName..."
+    $script:vaultRegistered = $true
+    [array]$script:AtlassianCloudProfiles = (Get-SecretInfo -Vault $script:AtlassianCloudPowerKitVaultName -Name '*').Name
+    Write-Debug "Found profiles: $script:AtlassianCloudProfiles"
 }
 
 function Register-AtlassianCloudPowerKitProfile {
@@ -189,30 +259,27 @@ function Register-AtlassianCloudPowerKitProfile {
         [Parameter(Mandatory = $false)]
         [PSCredential] $OpsgenieAPICredential
     )
-    # Register the secret vault
-    # Cheking if the vault is already registered
-    $ProfileName = $ProfileName.Trim().ToLower()
-    if (-not (Get-SecretVault -Name $script:AtlassianCloudPowerKitVaultName -ErrorAction SilentlyContinue)) {
-        Write-Debug "No vault found called $script:AtlassianCloudPowerKitVaultName. Registering..."
-        Register-SecretVault -Name $script:AtlassianCloudPowerKitVaultName -ModuleName 'AtlassianCloud-PowerKit-Shared' -VaultParameters @{}
-        Write-Debug "Registered vault $script:AtlassianCloudPowerKitVaultName successfully."
+    if (!$script:vaultRegistered) {
+        Register-AtlassianCloudPowerKitVault
     }
-    Get-AtlassianCloudPowerKitVault # ensure vault unlocked and profile list loaded
     # Check if the profile already exists in the secret vault
-    if ($script:AtlassianCloudProfiles.ContainsKey($ProfileName)) {
+    if ($null -ne $script:AtlassianCloudProfiles -and $script:AtlassianCloudProfiles.Count -gt 0 -and $script:AtlassianCloudProfiles.Contains($ProfileName)) {
         Write-Debug "Profile $ProfileName already exists."
         # Create a hashtable of the profile data to store in the secret vault
         return $false
     }
     else {
         #Write-Debug "Profile $ProfileName does not exist. Creating..."
+        Write-Debug "Preparing profile data for $ProfileName..."
         $CredPair = "$($AtlassianCloudAPICredential.UserName):$($AtlassianCloudAPICredential.GetNetworkCredential().password)"
-        $AtlassianCloudAPICredential = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($CredPair))
+        Write-Debug "CredPair: $CredPair"
+        $AtlassianCloudAPIAuthToken = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($CredPair))
         $ProfileData = @{
             'PROFILE_NAME'                = $ProfileName
             'AtlassianCloudAPIEndpoint'   = $AtlassianCloudAPIEndpoint
             'AtlassianCloudAPIUserName'   = $AtlassianCloudAPICredential.UserName
-            'AtlassianCloudAPIAuthString' = $AtlassianCloudAPICredential
+            'AtlassianCloudAPIAuthString' = $AtlassianCloudAPIAuthToken
+            
         }
         if ($UseOpsgenieAPI) {
             $OpsgenieAPICredential = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($OpsgenieAPICredential.GetNetworkCredential().password))
@@ -220,9 +287,14 @@ function Register-AtlassianCloudPowerKitProfile {
             $ProfileData.Add('OpsgenieAPIAuthString', $OpsgenieAPICredential)
             $ProfileData.Add('UseOpsgenieAPI', $UseOpsgenieAPI)
         }
+        Write-Debug "Creating profile $ProfileName in $script:AtlassianCloudPowerKitVaultName..."
+        Write-Debug "Priflie Data: $($ProfileData | Format-List * | Out-String)"
         Set-Secret -Name $ProfileName -Secret $ProfileData -Vault $script:AtlassianCloudPowerKitVaultName
     }
     Write-Debug "Profile $ProfileName created successfully in $script:AtlassianCloudPowerKitVaultName."
+    Write-Debug 'Clearing existing profiles selection...'
+    Reset-AtlassianCloudPowerKitProfile
+    Set-AtlassianCloudPowerKitProfile -ProfileName $ProfileName
 }
 
 function Reset-AtlassianCloudPowerKitProfile {
@@ -244,15 +316,30 @@ function Get-AtlassianCloudSelectedProfile {
         Write-Debug 'No profile loaded. Please load a profile first.'
         return $false
     }
-    $LOADED_SCRIPT_VARS = $script:AtlassianCloudSelectedProfile
-    if ($script:AtlassianCloudAPIEndpoint -and $script:AtlassianCloudAPIHeaders) {
-        $LOADED_SCRIPT_VARS.Add('AtlassianCloudAPIEndpoint', $script:AtlassianCloudAPIEndpoint)
-        $LOADED_SCRIPT_VARS.Add('AtlassianCloudAPIHeaders', $script:AtlassianCloudAPIHeaders)
-    }
-    if ($script:OpsgenieAPIEndpoint -and $script:OpsgenieAPIHeaders) {
-        $LOADED_SCRIPT_VARS.Add('OpsgenieAPIEndpoint', $script:OpsgenieAPIEndpoint)
-        $LOADED_SCRIPT_VARS.Add('OpsgenieAPIHeaders', $script:OpsgenieAPIHeaders)
+    return $script:AtlassianCloudSelectedProfile
+}
 
+function Get-AtlassianCloudAPIHeaders {
+    if ($script:AtlassianCloudAPIHeaders.Count -eq 0) {
+        Write-Debug 'No API headers set. Please load a profile first.'
+        return $false
     }
-    return $LOADED_SCRIPT_VARS
+    return $script:AtlassianCloudAPIHeaders
+}
+function Get-OpsgenieAPIHeaders {
+    if ($script:OpsgenieAPIHeaders.Count -eq 0) {
+        Write-Debug 'No Opsgenie API headers set.'
+        return $false
+    }
+    return $script:OpsgenieAPIHeaders
+}
+
+function Get-AtlassianCloudPowerKitProfileList {
+    if (!$script:vaultRegistered) {
+        Register-AtlassianCloudPowerKitVault
+    }
+    else {
+        [array]$script:AtlassianCloudProfiles = (Get-SecretInfo -Vault $script:AtlassianCloudPowerKitVaultName -Name '*').Name
+    }
+    return [array]$script:AtlassianCloudProfiles
 }

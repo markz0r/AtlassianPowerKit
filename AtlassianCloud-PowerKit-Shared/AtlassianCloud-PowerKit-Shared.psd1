@@ -51,7 +51,7 @@
     # ProcessorArchitecture = ''
 
     # Modules that must be imported into the global environment prior to importing this module
-    RequiredModules   = @('Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
+    RequiredModules   = @('Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore', '.\Strong-PasswordGenerator\Strong-PasswordGenerator.psd1')
 
     # Assemblies that must be loaded prior to importing this module
     # RequiredAssemblies = @()
@@ -66,16 +66,19 @@
     # FormatsToProcess = @()
 
     # Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
-    #NestedModules     = @('AtlassianCloud-PowerKit-Shared.Extension.psm1')
+    #NestedModules     = @('..\AtlassianCloud-PowerKit-Vault\AtlassianCloud-PowerKit-Vault.psd1')
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
     FunctionsToExport = @(
+        'Register-AtlassianCloudPowerKitVault',
+        'Get-AtlassianCloudPowerKitProfileList',
         'Set-AtlassianCloudPowerKitProfile',
         'Reset-AtlassianCloudPowerKitProfile',
-        'Get-AtlassianCloudPowerKitProfileList',
         'Register-AtlassianCloudPowerKitProfile',
         'Clear-AtlassianCloudPowerKitVault',
-        'Get-AtlassianCloudSelectedProfile'
+        'Get-AtlassianCloudSelectedProfile',
+        'Get-AtlassianCloudAPIHeaders',
+        'Get-OpsGenieAPIHeaders'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
@@ -98,10 +101,10 @@
 
     # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
     PrivateData       = @{
-        'SecretManagement' = @{
-            'VaultName' = 'AtlassianCloudPowerKitVault'
-        }
-        PSData             = @{
+        #'SecretManagement' = @{
+        #    'VaultName' = 'AtlassianCloudPowerKitVault'
+        #}
+        PSData = @{
 
             # Tags applied to this module. These help with module discovery in online galleries.
             # Tags = @()
