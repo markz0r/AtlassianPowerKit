@@ -1,4 +1,12 @@
+$script:LOADED_PROFILE = @{}
 
+function Set-LoadedProfileConfluence {
+    param (
+        [Parameter(Mandatory = $true)]
+        [hashtable]$PROFILE
+    )
+    $script:LOADED_PROFILE = $PROFILE
+}
 
 # Function to create a mapping of Confluence spaces and their IDs, that is accessible to all functions
 function Get-ConfluenceSpaces {
@@ -10,7 +18,7 @@ function Get-ConfluenceSpaces {
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
     catch {
-        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__ 
+        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
         Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
     }
     $global:PK_ConfuenceSpaceMap = $REST_RESULTS.results | ForEach-Object {
@@ -45,7 +53,7 @@ function Get-ConfluencePage {
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
     catch {
-        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__ 
+        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
         Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
     }
     Write-Debug "Found $($REST_RESULTS.results.count) pages..."
@@ -70,7 +78,7 @@ function Convert-JiraIssuesToConfluencePageTable {
     try {
         $content = Get-Content $JSON_FILE
         # validate the JSON content
-        $json = $content | ConvertFrom-Json    
+        $json = $content | ConvertFrom-Json
     }
     catch {
         Write-Debug "File not found or invalid JSON: $JSON_FILE"
@@ -83,8 +91,8 @@ function Convert-JiraIssuesToConfluencePageTable {
         # Where field name is in the FIELD_LIST, add it to the table
         $_.fields | Where-Object { $FIELD_LIST -contains $_.name } | ForEach-Object {
             $CONFLUENCE_PAGE_TABLE += "| $($_.key) | $($_.fields.summary) | $($_.fields.status.name) | $($_.fields.assignee.name) | $($_.fields.created) | $($_.fields.updated) |"
-        }   
-        
+        }
+
     }
     $CONFLUENCE_PAGE_TABLE
 }
@@ -105,7 +113,7 @@ function Export-ConfluencePageStorageFormat {
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
     catch {
-        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__ 
+        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
         Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
     }
     $CONFLUENCE_PAGE_STORAGE = $REST_RESULTS.body.storage.value
@@ -132,7 +140,7 @@ function Set-ConfluencePage {
     try {
         $content = Get-Content $CONF_STORAGE_FORMAT_DOCUMENT
         # validate the XML content
-        $xml = $content | ConvertFrom-Xml
+        #$xml = $content | ConvertFrom-Xml
     }
     catch {
         throw "File does not exist or is not valid XML: $CONF_STORAGE_FORMAT_DOCUMENT"
@@ -157,7 +165,7 @@ function Set-ConfluencePage {
 
     $CURRENT_PAGE = Get-ConfluencePage -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_TITLE $CONFLUENCE_PAGE_TITLE
     # Export the current page content to a file in storage format
-    
+
     if (-not $CURRENT_PAGE) {
         Write-Debug 'Page does not exist. Creating page...'
         $PAGE_PAYLOAD = @{
@@ -196,7 +204,7 @@ function Set-ConfluencePage {
         Write-Debug "Page Payload: $($PAGE_PAYLOAD | ConvertTo-Json -Depth 10)"
         try {
             Invoke-Rest -Uri "https://$global:PK_AtlassianCloudAPIEndpoint/wiki/rest/api/content/$PAGE_ID" -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Put -Body ($PAGE_PAYLOAD | ConvertTo-Json -Depth 10) -ContentType 'application/json'
-        } 
+        }
         catch {
             Write-Debug 'StatusCode:' $_.ToString()
             Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
