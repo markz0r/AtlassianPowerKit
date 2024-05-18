@@ -4,8 +4,8 @@
 !obj/*.json
 !obj/*.props
 !obj/*.targets
-!AtlassianCloud-PowerKit*/
-!AtlassianCloud-PowerKit-Shared/Strong-PasswordGenerator
+!AtlassianPowerKit*/
+!AtlassianPowerKit-Shared/Strong-PasswordGenerator
 !*.psd1
 !*.psm1
 !README.md

@@ -4,13 +4,13 @@
 
 .DESCRIPTION
     Atlassian Cloud PowerShell Module - Users and Groups
-    - Dependencies: AtlassianCloud-PowerKit-Shared
+    - Dependencies: AtlassianPowerKit-Shared
         - New-AtlassianCloudAPIEndpoint
     - Users and Groups Module Functions
         - Get-AtlassianGroupMembers
         - Get-AtlassianCloudUser
         - Show-JiraCloudJSMProjectRole
-    - To list all functions in this module, run: Get-Command -Module AtlassianCloud-PowerKit-UsersAndGroups
+    - To list all functions in this module, run: Get-Command -Module AtlassianPowerKit-UsersAndGroups
     - Debug output is enabled by default. To disable, set $DisableDebug = $true before running functions.
 
 .EXAMPLE
@@ -30,18 +30,29 @@
 
 
 .LINK
-GitHub: https://github.com/markz0r/AtlassianCloud-PowerKit
+GitHub: https://github.com/markz0r/AtlassianPowerKit
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 $script:LOADED_PROFILE = @{}
 
-function Set-LoadedProfileUsersAndGroups {
-    param (
-        [Parameter(Mandatory = $true)]
-        [hashtable]$PROFILE
-    )
-    $script:LOADED_PROFILE = $PROFILE
+# Function to list all Atlassian Groups and their members
+function Get-AtlassianGroups {
+    $script:LOADED_PROFILE = Get-LoadedProfile
+    $GROUPS_ENDPOINT = "https://$($script:LOADED_PROFILE.AtlassianCloudAPIEndpoint)/rest/api/2/groups/picker"
+    $GROUP_ENDPOINT_HEADERS = $script:AtlassianCloudAPIHeaders.'maxResults' = 100
+    Write-Debug "Groups Endpoint: $GROUPS_ENDPOINT"
+    Write-Debug "Headers: $GROUP_ENDPOINT_HEADERS"
+    try {
+        $REST_RESULTS = Invoke-RestMethod -Uri $GROUPS_ENDPOINT -Headers $GROUP_ENDPOINT_HEADERS -Method Get -ContentType 'application/json'
+        #Write-Debug $REST_RESULTS.getType()
+        Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+    }
+    catch {
+        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
+        Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
+    }
+    return $REST_RESULTS
 }
 
 # Get all users in a Group
@@ -50,13 +61,12 @@ function Get-AtlassianGroupMembers {
         [Parameter(Mandatory = $true)]
         [string]$GROUP_NAME
     )
-    Get-AtlassianCloudAPIEndpoint
     $GROUP_NAME_ENCODED = [System.Web.HttpUtility]::UrlEncode($GROUP_NAME)
     Write-Debug "Group Name: $GROUP_NAME"
     Write-Debug "Group Name Encoded: $GROUP_NAME_ENCODED"
-    $GROUP_MEMBERS_ENDPOINT = "https://$global:PK_AtlassianCloudAPIEndpoint/rest/api/3/group/member?groupname=$GROUP_NAME_ENCODED"
+    $GROUP_MEMBERS_ENDPOINT = "https://$script:ATLASSIAN_CLOUD_API_ENDPOINT/rest/api/3/group/member?groupname=$GROUP_NAME_ENCODED"
     try {
-        $REST_RESULTS = Invoke-RestMethod -Uri $GROUP_MEMBERS_ENDPOINT -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Get -ContentType 'application/json'
+        $REST_RESULTS = Invoke-RestMethod -Uri $GROUP_MEMBERS_ENDPOINT -Headers $script:AtlassianCloudAPIHeaders -Method Get -ContentType 'application/json'
         #Write-Debug $REST_RESULTS.getType()
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
@@ -72,13 +82,12 @@ function Get-AtlassianCloudUser {
         [Parameter(Mandatory = $true)]
         [string]$ACCOUNT_ID
     )
-    Get-AtlassianCloudAPIEndpoint
     $ACCOUNT_ID_ENCODED = [System.Web.HttpUtility]::UrlEncode($ACCOUNT_ID)
     Write-Debug "Account ID: $ACCOUNT_ID"
     Write-Debug "Account ID Encoded: $ACCOUNT_ID_ENCODED"
-    $USER_ENDPOINT = "https://$global:PK_AtlassianCloudAPIEndpoint/rest/api/3/user?accountId=$ACCOUNT_ID_ENCODED"
+    $USER_ENDPOINT = "https://$script:ATLASSIAN_CLOUD_API_ENDPOINT/rest/api/3/user?accountId=$ACCOUNT_ID_ENCODED"
     try {
-        $REST_RESULTS = Invoke-RestMethod -Uri $USER_ENDPOINT -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Get -ContentType 'application/json'
+        $REST_RESULTS = Invoke-RestMethod -Uri $USER_ENDPOINT -Headers $script:AtlassianCloudAPIHeaders -Method Get -ContentType 'application/json'
         Write-Debug $REST_RESULTS.getType()
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
@@ -94,8 +103,7 @@ function Show-JiraCloudJSMProjectRole {
         [Parameter(Mandatory = $true)]
         [string]$JiraCloudJSMProjectKey
     )
-    Get-AtlassianCloudAPIEndpoint
-    $JiraProjectRoles = Invoke-RestMethod -Uri "https://$global:PK_AtlassianCloudAPIEndpoint/rest/api/3/project/$JiraCloudJSMProjectKey/role" -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Get
+    $JiraProjectRoles = Invoke-RestMethod -Uri "https://$script:ATLASSIAN_CLOUD_API_ENDPOINT/rest/api/3/project/$JiraCloudJSMProjectKey/role" -Headers $script:AtlassianCloudAPIHeaders -Method Get
     Write-Debug $JiraProjectRoles.getType()
     $JiraProjectRoles | Get-Member -MemberType Properties | ForEach-Object {
         Write-Debug "$($_.Name) - $($_.Definition) - ID: $($_.Definition.split('/')[-1])"

@@ -3,38 +3,28 @@
     Atlassian Cloud PowerKit module for interacting with Atlassian Cloud REST API.
 .DESCRIPTION
     Atlassian Cloud PowerKit module for interacting with Atlassian Cloud REST API.
-    - Dependencies: AtlassianCloud-PowerKit-Shared
+    - Dependencies: AtlassianPowerKit-Shared
     - Functions:
-      - Use-AtlassianCloud-PowerKit: Interactive function to run any function in the module.
+      - Use-AtlassianPowerKit: Interactive function to run any function in the module.
     - Debug output is enabled by default. To disable, set $DisableDebug = $true before running functions.
 .EXAMPLE
     Use-AtlassianCloudPowerKit
-    This example lists all functions in the AtlassianCloud-PowerKit module.
+    This example lists all functions in the AtlassianPowerKit module.
 .EXAMPLE
     Use-AtlassianCloudPowerKit
     Simply run the function to see a list of all functions in the module and nested modules.
 .EXAMPLE
     Get-DefinedPowerKitVariables
-    This example lists all variables defined in the AtlassianCloud-PowerKit module.
+    This example lists all variables defined in the AtlassianPowerKit module.
 .LINK
     GitHub:
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-$script:AtlassianCloudProfiles = @()
+$script:PROFILE_LIST = @()
 $script:LOADED_PROFILE = @{}
 
 $script:AtlassianPowerKitRequiredModules = @('Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
-
-function Set-LoadedProfileForNestedModules {
-    $nestedModules = Get-Module -Name AtlassianCloud-PowerKit | Select-Object -ExpandProperty NestedModules | Where-Object Name -Match 'AtlassianCloud-PowerKit-.*'
-    $nestedModules | ForEach-Object {
-        $_.ExportedCommands.Keys | Where-Object { $_ -eq 'Set-LoadedProfile*' } | ForEach-Object { 
-            Write-Debug "Setting loaded profile for nested module: $($_.Name)"
-            Invoke-Expression $_.Name -PROFILE $script:LOADED_PROFILE
-        }
-    }
-}
 
 function Get-RequisitePowerKitModules {
     $script:AtlassianPowerKitRequiredModules | ForEach-Object {
@@ -58,7 +48,7 @@ function Get-RequisitePowerKitModules {
 function Show-AtlassianCloudPowerKitFunctions {
     # List nested modules and their exported functions to the console in a readable format, grouped by module
     $colors = @('Green', 'Cyan', 'Red', 'Magenta', 'Yellow')
-    $nestedModules = Get-Module -Name AtlassianCloud-PowerKit | Select-Object -ExpandProperty NestedModules | Where-Object Name -Match 'AtlassianCloud-PowerKit-.*'
+    $nestedModules = Get-Module -Name AtlassianPowerKit | Select-Object -ExpandProperty NestedModules | Where-Object Name -Match 'AtlassianPowerKit-.*'
 
     $colorIndex = 0
     $functionReferences = @{}
@@ -75,12 +65,12 @@ function Show-AtlassianCloudPowerKitFunctions {
         Write-Host ' ' -BackgroundColor Black
         $_.ExportedCommands.Keys | ForEach-Object {
             # Assign a letter reference to the function
-            $letterReference = [char](65 + $colorIndex)
-            $functionReferences[$letterReference] = $_
+            $functRefNum = $colorIndex
+            $functionReferences[$functRefNum] = $_
 
             Write-Host ' ' -NoNewline -BackgroundColor "Dark$color"
             Write-Host '   ' -NoNewline -BackgroundColor Black
-            Write-Host "$letterReference -> " -NoNewline -BackgroundColor Black
+            Write-Host "$functRefNum -> " -NoNewline -BackgroundColor Black
             Write-Host "$_" -NoNewline -BackgroundColor Black -ForegroundColor $color
             # Calculate the number of spaces needed to fill the rest of the line
             $spaces = ' ' * (50 - $_.Length)
@@ -102,21 +92,21 @@ function Show-AtlassianCloudPowerKitFunctions {
     $selectedFunction = Read-Host -Prompt "`nSelect a function to run (or hit enter to exit):"
     # Attempt to convert the input string to a char
     try {
-        $selectedFunction = [char]$selectedFunction
+        $selectedFunction = [int]$selectedFunction
     }
     catch {
-        if ([string]::IsNullOrEmpty($selectedFunction)) {
-            exit 0
+        if (!$selectedFunction) {
+            return $true
         }
         Write-Host 'Invalid selection. Please try again.'
         Show-AtlassianCloudPowerKitFunctions
     }
     # Run the selected function timing the execution
     Write-Host "`n"
-    Write-Host "You selected: $selectedFunction"
+    Write-Host "You selected:  $($functionReferences.$selectedFunction)" -ForegroundColor Green
     try {
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        Invoke-Expression $functionReferences[$selectedFunction]
+        Invoke-Expression ($functionReferences.$selectedFunction)
         $stopwatch.Stop()
     }
     catch {
@@ -133,7 +123,7 @@ function Show-AtlassianCloudPowerKitFunctions {
     }
     else {
         Write-Host 'Have a great day!'
-        exit 0
+        return $true
     }
 }
 
@@ -153,8 +143,8 @@ function New-AtlassianCloudPowerKitProfile {
             Register-AtlassianCloudPowerKitProfile($ProfileName)       
         }
         catch {
-            Write-Debug "Error: $($_.Exception.Message)"
-            throw "Register-AtlassianCloudPowerKitProfile $ProfileName failed. Exiting."
+            Write-Debug "Error: $($_.Exception.Message)'
+            throw 'Register-AtlassianCloudPowerKitProfile $ProfileName failed. Exiting."
         }
     }
 }
@@ -162,16 +152,16 @@ function New-AtlassianCloudPowerKitProfile {
 # Function to list availble profiles with number references for interactive selection or 'N' to create a new profile
 function Show-AtlassianCloudPowerKitProfileList {
     $profileIndex = 0
-    if ($script:AtlassianCloudProfiles.Count -eq 0) {
+    if ($script:PROFILE_LIST.Count -eq 0) {
         Write-Host 'No profiles found. Please create a new profile.'
         New-AtlassianCloudPowerKitProfile
     }
     else {
-        # ensure $script:AtlassianCloudProfiles is an array
-        if ($script:AtlassianCloudProfiles -isnot [System.Array]) {
-            $script:AtlassianCloudProfiles = @($script:AtlassianCloudProfiles)
+        # ensure $script:AtlassianCloudProfilesis an array
+        if ($script:PROFILE_LIST -isnot [System.Array]) {
+            $script:PROFILE_LIST = @($script:PROFILE_LIST)
         }
-        $script:AtlassianCloudProfiles | ForEach-Object {
+        $script:PROFILE_LIST | ForEach-Object {
             Write-Host "[$profileIndex] $_"
             $profileIndex++
         }
@@ -184,13 +174,13 @@ function Show-AtlassianCloudPowerKitProfileList {
         } 
         elseif ($selectedProfile -eq 'Q') {
             Write-Host 'Exiting...'
-            exit 0
+            return $true
         }
         else {
             $selectedProfile = [int]$selectedProfile
             Write-Debug "Selected profile index: $selectedProfile"
-            Write-Debug "Selected profile name: $($script:AtlassianCloudProfiles[$selectedProfile])"
-            Set-AtlassianCloudPowerKitProfile -ProfileName $script:AtlassianCloudProfiles.Item($selectedProfile)
+            Write-Debug "Selected profile name: $($script:PROFILE_LIST[$selectedProfile])"
+            return $script:PROFILE_LIST[$selectedProfile]
         }
     }
 }
@@ -201,23 +191,20 @@ function Use-AtlassianCloudPowerKit {
         [string] $ProfileName
     )
     Get-RequisitePowerKitModules
-    $script:AtlassianCloudProfiles = Get-AtlassianCloudPowerKitProfileList
+    $script:PROFILE_LIST = Get-AtlassianCloudPowerKitProfileList
     if (!$ProfileName) {
         Write-Host 'No profile name provided. Check the profiles available.'
-        Show-AtlassianCloudPowerKitProfileList
+        $ProfileName = Show-AtlassianCloudPowerKitProfileList
     }
     else {
         $ProfileName = $ProfileName.Trim().ToLower()
-        if ($script:AtlassianCloudProfiles -contains $ProfileName) {
-            Set-AtlassianCloudPowerKitProfile -ProfileName $ProfileName
-        }
-        else {
+        if (!($script:PROFILE_LIST -contains $ProfileName)) {
             Write-Host 'Profile not found. Check the profiles available.'
             Show-AtlassianCloudPowerKitProfileList
         }
     }
-    $LOADED_PROFILE = Get-AtlassianCloudSelectedProfile
-    Set-LoadedProfileForNestedModules 
-    Write-Host "Profile loaded: $($LOADED_PROFILE.PROFILE_NAME)"
+    Set-AtlassianCloudPowerKitProfile -ProfileName $ProfileName
+    $script:LOADED_PROFILE = Get-LoadedProfile
+    Write-Host "Profile loaded: $($script:LOADED_PROFILE)"
     Show-AtlassianCloudPowerKitFunctions
 }

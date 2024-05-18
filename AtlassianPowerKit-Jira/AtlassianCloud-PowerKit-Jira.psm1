@@ -28,7 +28,7 @@
             - Users and Groups
                 - Get-AtlassianGroupMembers
                 - Get-AtlassianCloudUser
-    - To list all functions in this module, run: Get-Command -Module AtlassianCloud-PowerKit
+    - To list all functions in this module, run: Get-Command -Module AtlassianPowerKit
     - Debug output is enabled by default. To disable, set $DisableDebug = $true before running functions.
 
 .PARAMETER AtlassianCloudAPIEndpoint
@@ -63,7 +63,7 @@
     This example gets the Jira Cloud JQL query results for all issues in all projects.
 
 .LINK
-GitHub: https://github.com/markz0r/AtlassianCloud-PowerKit
+GitHub: https://github.com/markz0r/AtlassianPowerKit
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
