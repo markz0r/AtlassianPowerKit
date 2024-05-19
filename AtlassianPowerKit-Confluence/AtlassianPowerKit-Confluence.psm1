@@ -1,19 +1,16 @@
-$script:LOADED_PROFILE = @{}
-
-function Set-LoadedProfileConfluence {
+$ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
+$script:CONFLUENCE_SPACE_MAP = @{}
+    
+# Function to create a mapping of Confluence spaces and their IDs, that is accessible to all functions
+function Get-ConfluenceSpaces {
     param (
         [Parameter(Mandatory = $true)]
         [hashtable]$PROFILE
     )
-    $script:LOADED_PROFILE = $PROFILE
-}
-
-# Function to create a mapping of Confluence spaces and their IDs, that is accessible to all functions
-function Get-ConfluenceSpaces {
-    Get-AtlassianCloudAPIEndpoint
-    $CONFLUENCE_SPACES_ENDPOINT = "https://$global:PK_AtlassianCloudAPIEndpoint/wiki/api/v2/spaces"
+    
+    $CONFLUENCE_SPACES_ENDPOINT = "https://$PROFILE.AtlassianAPIEndpoint/wiki/api/v2/spaces"
     try {
-        $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_SPACES_ENDPOINT -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Get -ContentType 'application/json'
+        $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_SPACES_ENDPOINT -Headers $PROFILE.AtlassianAPIHeaders -Method Get -ContentType 'application/json'
         Write-Debug $REST_RESULTS.getType()
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
@@ -21,16 +18,15 @@ function Get-ConfluenceSpaces {
         Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
         Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
     }
-    $global:PK_ConfuenceSpaceMap = $REST_RESULTS.results | ForEach-Object {
-        [PSCustomObject]@{
-            key    = $_.key
+    $script:CONFLUENCE_SPACE_MAP = $REST_RESULTS.results | ForEach-Object {
+        $script:CONFLUENCE_SPACE_MAP[$_.key] = [PSCustomObject]@{
             name   = $_.name
             id     = $_.id
             type   = $_.type
             status = $_.status
         }
     }
-    Write-Debug "Confluence Space Maps set: $($global:PK_ConfuenceSpaceMap | Format-List * | Out-String)"
+    Write-Debug "Confluence Space Maps set: $($script:CONFLUENCE_SPACE_MAP | Format-List * | Out-String)"
 }
 
 # Function to get a Confleunce page
@@ -41,14 +37,14 @@ function Get-ConfluencePage {
         [Parameter(Mandatory = $true)]
         [string]$CONFLUENCE_PAGE_TITLE
     )
-    Get-AtlassianCloudAPIEndpoint
+    Get-AtlassianAPIEndpoint
     $CONFLUENCE_PAGE_TITLE_ENCODED = [System.Web.HttpUtility]::UrlEncode($CONFLUENCE_PAGE_TITLE)
     Write-Debug "Confluence Space Key: $CONFLUENCE_SPACE_KEY"
     Write-Debug "Confluence Page Title: $CONFLUENCE_PAGE_TITLE"
     Write-Debug "Confluence Page Title Encoded: $CONFLUENCE_PAGE_TITLE_ENCODED"
-    $CONFLUENCE_PAGE_ENDPOINT = "https://$global:PK_AtlassianCloudAPIEndpoint/wiki/api/v2/pages?spaceKey=$CONFLUENCE_SPACE_KEY&title=$CONFLUENCE_PAGE_TITLE_ENCODED&body-format=storage&expand=body.view,version"
+    $CONFLUENCE_PAGE_ENDPOINT = "https://$PROFILE.AtlassianAPIEndpoint/wiki/api/v2/pages?spaceKey=$CONFLUENCE_SPACE_KEY&title=$CONFLUENCE_PAGE_TITLE_ENCODED&body-format=storage&expand=body.view,version"
     try {
-        $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Get
+        $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $PROFILE.AtlassianAPIHeaders -Method Get
         Write-Debug $REST_RESULTS.getType()
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
@@ -105,10 +101,10 @@ function Export-ConfluencePageStorageFormat {
         [Parameter(Mandatory = $true)]
         [string]$CONFLUENCE_PAGE_ID
     )
-    Get-AtlassianCloudAPIEndpoint
-    $CONFLUENCE_PAGE_ENDPOINT = "https://$global:PK_AtlassianCloudAPIEndpoint/wiki/api/v2/pages/$CONFLUENCE_PAGE_ID?expand=body.storage"
+    Get-AtlassianAPIEndpoint
+    $CONFLUENCE_PAGE_ENDPOINT = "https://$PROFILE.AtlassianAPIEndpoint/wiki/api/v2/pages/$CONFLUENCE_PAGE_ID?expand=body.storage"
     try {
-        $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Get
+        $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $PROFILE.AtlassianAPIHeaders -Method Get
         Write-Debug $REST_RESULTS.getType()
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
@@ -145,7 +141,6 @@ function Set-ConfluencePage {
     catch {
         throw "File does not exist or is not valid XML: $CONF_STORAGE_FORMAT_DOCUMENT"
     }
-    Get-AtlassianCloudAPIEndpoint
     Get-ConfluenceSpaces
     $CONFLUENCE_PAGE_TITLE_ENCODED = [System.Web.HttpUtility]::UrlEncode($CONFLUENCE_PAGE_TITLE)
     $CONFLUENCE_PARENT_PAGE_TITLE_ENCODED = [System.Web.HttpUtility]::UrlEncode($CONFLUENCE_PARENT_PAGE_TITLE)
@@ -169,7 +164,7 @@ function Set-ConfluencePage {
     if (-not $CURRENT_PAGE) {
         Write-Debug 'Page does not exist. Creating page...'
         $PAGE_PAYLOAD = @{
-            spaceId  = $global:PK_ConfuenceSpaceMap | Where-Object { $_.key -eq $CONFLUENCE_SPACE_KEY } | Select-Object -ExpandProperty id
+            spaceId  = $script:CONFLUENCE_SPACE_MAP | Where-Object { $_.key -eq $CONFLUENCE_SPACE_KEY } | Select-Object -ExpandProperty id
             status   = 'current'
             title    = "$CONFLUENCE_PAGE_TITLE"
             parentId = $PARENT_PAGE_ID
@@ -180,7 +175,7 @@ function Set-ConfluencePage {
 
         }
         Write-Debug "Page Payload: $($PAGE_PAYLOAD | ConvertTo-Json -Depth 10)"
-        $REST_RESULTS = Invoke-RestMethod -Uri "https://$global:PK_AtlassianCloudAPIEndpoint/wiki/api/v2/pages" -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Post -Body ($PAGE_PAYLOAD | ConvertTo-Json -Depth 10) -ContentType 'application/json'
+        $REST_RESULTS = Invoke-RestMethod -Uri "https://$PROFILE.AtlassianAPIEndpoint/wiki/api/v2/pages" -Headers $PROFILE.AtlassianAPIHeaders -Method Post -Body ($PAGE_PAYLOAD | ConvertTo-Json -Depth 10) -ContentType 'application/json'
         Write-Debug $REST_RESULTS.getType()
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
@@ -203,14 +198,14 @@ function Set-ConfluencePage {
         }
         Write-Debug "Page Payload: $($PAGE_PAYLOAD | ConvertTo-Json -Depth 10)"
         try {
-            Invoke-Rest -Uri "https://$global:PK_AtlassianCloudAPIEndpoint/wiki/rest/api/content/$PAGE_ID" -Headers $global:PK_AtlassianDefaultAPIHeaders -Method Put -Body ($PAGE_PAYLOAD | ConvertTo-Json -Depth 10) -ContentType 'application/json'
+            Invoke-Rest -Uri "https://$PROFILE.AtlassianAPIEndpoint/wiki/rest/api/content/$PAGE_ID" -Headers $PROFILE.AtlassianAPIHeaders -Method Put -Body ($PAGE_PAYLOAD | ConvertTo-Json -Depth 10) -ContentType 'application/json'
         }
         catch {
             Write-Debug 'StatusCode:' $_.ToString()
             Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
         }
         Write-Debug '###############################################'
-        Write-Debug "Querying the page to confirm the value was set... $CONFLUENCE_PAGE_TITLE in $CONFLUENCE_SPACE_KEY via $global:PK_AtlassianCloudAPIEndpoint"
+        Write-Debug "Querying the page to confirm the value was set... $CONFLUENCE_PAGE_TITLE in $CONFLUENCE_SPACE_KEY via $PROFILE.AtlassianAPIEndpoint"
         Get-ConfluencePage -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_TITLE $CONFLUENCE_PAGE_TITLE
         Write-Debug '###############################################'
     }

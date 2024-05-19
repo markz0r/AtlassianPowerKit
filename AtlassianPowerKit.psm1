@@ -8,10 +8,10 @@
       - Use-AtlassianPowerKit: Interactive function to run any function in the module.
     - Debug output is enabled by default. To disable, set $DisableDebug = $true before running functions.
 .EXAMPLE
-    Use-AtlassianCloudPowerKit
+    Use-AtlassianPowerKit
     This example lists all functions in the AtlassianPowerKit module.
 .EXAMPLE
-    Use-AtlassianCloudPowerKit
+    Use-AtlassianPowerKit
     Simply run the function to see a list of all functions in the module and nested modules.
 .EXAMPLE
     Get-DefinedPowerKitVariables
@@ -21,10 +21,7 @@
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-$script:PROFILE_LIST = @()
-$script:LOADED_PROFILE = @{}
-
-$script:AtlassianPowerKitRequiredModules = @('Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
+$script:AtlassianPowerKitRequiredModules = @('PowerShellGet', 'Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
 
 function Get-RequisitePowerKitModules {
     $script:AtlassianPowerKitRequiredModules | ForEach-Object {
@@ -45,7 +42,7 @@ function Get-RequisitePowerKitModules {
     }
 }
 # Function display console interface to run any function in the module
-function Show-AtlassianCloudPowerKitFunctions {
+function Show-AtlassianPowerKitFunctions {
     # List nested modules and their exported functions to the console in a readable format, grouped by module
     $colors = @('Green', 'Cyan', 'Red', 'Magenta', 'Yellow')
     $nestedModules = Get-Module -Name AtlassianPowerKit | Select-Object -ExpandProperty NestedModules | Where-Object Name -Match 'AtlassianPowerKit-.*'
@@ -55,12 +52,12 @@ function Show-AtlassianCloudPowerKitFunctions {
     $nestedModules | ForEach-Object {
         # Select a color from the list
         $color = $colors[$colorIndex % $colors.Count]
-        $spaces = ' ' * (52 - $_.Name.Length)
+        $spaces = ' ' * (51 - $_.Name.Length)
         Write-Host '' -BackgroundColor Black
         Write-Host "Module: $($_.Name)" -BackgroundColor $color -ForegroundColor White -NoNewline
         Write-Host $spaces  -BackgroundColor $color -NoNewline
         Write-Host ' ' -BackgroundColor Black
-        $spaces = ' ' * 41
+        $spaces = ' ' * 40
         Write-Host " Exported Commands:$spaces" -BackgroundColor "Dark$color" -ForegroundColor White -NoNewline
         Write-Host ' ' -BackgroundColor Black
         $_.ExportedCommands.Keys | ForEach-Object {
@@ -73,14 +70,14 @@ function Show-AtlassianCloudPowerKitFunctions {
             Write-Host "$functRefNum -> " -NoNewline -BackgroundColor Black
             Write-Host "$_" -NoNewline -BackgroundColor Black -ForegroundColor $color
             # Calculate the number of spaces needed to fill the rest of the line
-            $spaces = ' ' * (50 - $_.Length)
+            $spaces = ' ' * (50 - ($_.Length + ($functRefNum.ToString().Length)))
             Write-Host $spaces -NoNewline -BackgroundColor Black
             Write-Host ' ' -NoNewline -BackgroundColor "Dark$color"
             Write-Host ' ' -BackgroundColor Black
             # Increment the color index for the next function
             $colorIndex++
         }
-        $spaces = ' ' * 60
+        $spaces = ' ' * 59
         Write-Host $spaces -BackgroundColor "Dark$color" -NoNewline
         Write-Host ' ' -BackgroundColor Black
     }
@@ -99,12 +96,12 @@ function Show-AtlassianCloudPowerKitFunctions {
             return $true
         }
         Write-Host 'Invalid selection. Please try again.'
-        Show-AtlassianCloudPowerKitFunctions
+        Show-AtlassianPowerKitFunctions
     }
     # Run the selected function timing the execution
     Write-Host "`n"
     Write-Host "You selected:  $($functionReferences.$selectedFunction)" -ForegroundColor Green
-    try {
+    try {     
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         Invoke-Expression ($functionReferences.$selectedFunction)
         $stopwatch.Stop()
@@ -113,22 +110,21 @@ function Show-AtlassianCloudPowerKitFunctions {
         # Write all output including errors to the console from the selected function
         Write-Host $_.Exception.Message -ForegroundColor Red
         throw "Error running function: $functionReferences[$selectedFunction] failed. Exiting."
-        # Exit with an error code
-        exit 1
     }
     finally {
+        Write-Host "`nFunction $($functionReferences.$selectedFunction) completed - execution time: $($stopwatch.Elapsed.TotalSeconds) seconds" -ForegroundColor Green
+        $runAnother = Read-Host 'Run another function? (Y/any key to exit)'
         # Ask the user if they want to run another function
-    }   if ($runAnother -eq 'Y') {
-        Get-PowerKitFunctions
+    } if ($runAnother -eq 'Y') {
+        Show-AtlassianPowerKitFunctions 
     }
     else {
         Write-Host 'Have a great day!'
-        return $true
     }
 }
 
 # Function to create a new profile
-function New-AtlassianCloudPowerKitProfile {
+function New-AtlassianPowerKitProfile {
     # Ask user to enter the profile name
     $ProfileName = Read-Host 'Enter a profile name:'
     $ProfileName = $ProfileName.ToLower().Trim()
@@ -140,71 +136,84 @@ function New-AtlassianCloudPowerKitProfile {
     }
     else {
         try {
-            Register-AtlassianCloudPowerKitProfile($ProfileName)       
+            Register-AtlassianPowerKitProfile($ProfileName)       
         }
         catch {
-            Write-Debug "Error: $($_.Exception.Message)'
-            throw 'Register-AtlassianCloudPowerKitProfile $ProfileName failed. Exiting."
+            Write-Debug "Error: $($_.Exception.Message)"
+            throw "Register-AtlassianPowerKitProfile $ProfileName failed. Exiting."
         }
     }
 }
 
 # Function to list availble profiles with number references for interactive selection or 'N' to create a new profile
-function Show-AtlassianCloudPowerKitProfileList {
+function Show-AtlassianPowerKitProfileList {
     $profileIndex = 0
-    if ($script:PROFILE_LIST.Count -eq 0) {
+    Write-Debug "Profile list: $env:AtlassianPowerKit_PROFILE_LIST"
+    $PROFILE_LIST = $env:AtlassianPowerKit_PROFILE_LIST.split()
+    Write-Debug "Profile list array $PROFILE_LIST"
+    if ($PROFILE_LIST.Count -eq 0) {
         Write-Host 'No profiles found. Please create a new profile.'
-        New-AtlassianCloudPowerKitProfile
+        New-AtlassianPowerKitProfile
     }
     else {
-        # ensure $script:AtlassianCloudProfilesis an array
-        if ($script:PROFILE_LIST -isnot [System.Array]) {
-            $script:PROFILE_LIST = @($script:PROFILE_LIST)
+        if ($PROFILE_LIST.Count -eq 0) {
+            Write-Host 'No profiles found.'
+            New-AtlassianPowerKitProfile
         }
-        $script:PROFILE_LIST | ForEach-Object {
+        $PROFILE_LIST = $env:AtlassianPowerKit_PROFILE_LIST.split()
+        $PROFILE_LIST | ForEach-Object {
             Write-Host "[$profileIndex] $_"
             $profileIndex++
         }
-        Write-Host '[N] Create a new profile'
-        Write-Host '[Q] Quit'
-        Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -ForegroundColor DarkGray
-        $selectedProfile = Read-Host 'Select a profile to use or create a new profile'
-        if ($selectedProfile -eq 'N') {
-            New-AtlassianCloudPowerKitProfile
-        } 
-        elseif ($selectedProfile -eq 'Q') {
-            Write-Host 'Exiting...'
-            return $true
-        }
-        else {
-            $selectedProfile = [int]$selectedProfile
-            Write-Debug "Selected profile index: $selectedProfile"
-            Write-Debug "Selected profile name: $($script:PROFILE_LIST[$selectedProfile])"
-            return $script:PROFILE_LIST[$selectedProfile]
-        }
+            
+    }
+    Write-Host '[N] Create a new profile'
+    Write-Host '[R] Reset vault and profiles - Deletes all profiles and vault data'
+    Write-Host '[Q] Quit'
+    Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -ForegroundColor DarkGray
+    $selectedProfile = Read-Host 'Select a profile to use or create a new profile'
+    if ($selectedProfile -eq 'N') {
+        New-AtlassianPowerKitProfile
+    } 
+    elseif ($selectedProfile -eq 'Q') {
+        Write-Host 'Exiting...'
+    }
+    elseif ($selectedProfile -eq 'R') {
+        Clear-AtlassianPowerKitVault
+    }
+    else {
+        $selectedProfile = [int]$selectedProfile
+        Write-Debug "Selected profile index: $selectedProfile"
+        Write-Debug "Selected profile name: $(@($env:AtlassianPowerKit_PROFILE_LIST)[$selectedProfile])"
+        return "$(@($env:AtlassianPowerKit_PROFILE_LIST)[$selectedProfile])"
     }
 }
 
-function Use-AtlassianCloudPowerKit {
+function Use-AtlassianPowerKit {
     param (
         [Parameter(Mandatory = $false)]
         [string] $ProfileName
     )
     Get-RequisitePowerKitModules
-    $script:PROFILE_LIST = Get-AtlassianCloudPowerKitProfileList
+    $env:AtlassianPowerKit_PROFILE_LIST = Get-AtlassianPowerKitProfileList
     if (!$ProfileName) {
         Write-Host 'No profile name provided. Check the profiles available.'
-        $ProfileName = Show-AtlassianCloudPowerKitProfileList
+        $ProfileName = Show-AtlassianPowerKitProfileList
     }
     else {
         $ProfileName = $ProfileName.Trim().ToLower()
-        if (!($script:PROFILE_LIST -contains $ProfileName)) {
+        if (!($env:AtlassianPowerKit_PROFILE_LIST -contains $ProfileName)) {
             Write-Host 'Profile not found. Check the profiles available.'
-            Show-AtlassianCloudPowerKitProfileList
+            Show-AtlassianPowerKitProfileList
         }
     }
-    Set-AtlassianCloudPowerKitProfile -ProfileName $ProfileName
-    $script:LOADED_PROFILE = Get-LoadedProfile
-    Write-Host "Profile loaded: $($script:LOADED_PROFILE)"
-    Show-AtlassianCloudPowerKitFunctions
+    if ($ProfileName -eq $false) {
+        Write-Host 'No profile selected. Exiting...'
+        return $null
+    }
+    else {
+        Set-AtlassianPowerKitProfile -ProfileName $ProfileName
+        Write-Host "Profile loaded: $($env:AtlassianPowerKit_PROFILE_NAME)"
+        Show-AtlassianPowerKitFunctions
+    }
 }
