@@ -148,25 +148,21 @@ function New-AtlassianPowerKitProfile {
 # Function to list availble profiles with number references for interactive selection or 'N' to create a new profile
 function Show-AtlassianPowerKitProfileList {
     $profileIndex = 0
-    Write-Debug "Profile list: $env:AtlassianPowerKit_PROFILE_LIST"
-    $PROFILE_LIST = $env:AtlassianPowerKit_PROFILE_LIST.split()
-    Write-Debug "Profile list array $PROFILE_LIST"
-    if ($PROFILE_LIST.Count -eq 0) {
+    if (!$env:AtlassianPowerKit_PROFILE_LIST) {
         Write-Host 'No profiles found. Please create a new profile.'
         New-AtlassianPowerKitProfile
-    }
+        Write-Debug "Profile List: $(Get-AtlassianPowerKitProfileList)"
+        Show-AtlassianPowerKitProfileList
+    } 
     else {
-        if ($PROFILE_LIST.Count -eq 0) {
-            Write-Host 'No profiles found.'
-            New-AtlassianPowerKitProfile
-        }
+        Write-Debug "Profile list: $env:AtlassianPowerKit_PROFILE_LIST"
         $PROFILE_LIST = $env:AtlassianPowerKit_PROFILE_LIST.split()
+        Write-Debug "Profile list array $PROFILE_LIST"
         $PROFILE_LIST | ForEach-Object {
             Write-Host "[$profileIndex] $_"
             $profileIndex++
         }
-            
-    }
+    }   
     Write-Host '[N] Create a new profile'
     Write-Host '[R] Reset vault and profiles - Deletes all profiles and vault data'
     Write-Host '[Q] Quit'
@@ -184,8 +180,8 @@ function Show-AtlassianPowerKitProfileList {
     else {
         $selectedProfile = [int]$selectedProfile
         Write-Debug "Selected profile index: $selectedProfile"
-        Write-Debug "Selected profile name: $(@($env:AtlassianPowerKit_PROFILE_LIST)[$selectedProfile])"
-        return "$(@($env:AtlassianPowerKit_PROFILE_LIST)[$selectedProfile])"
+        Write-Debug "Selected profile name: $($PROFILE_LIST[$selectedProfile])"
+        return "$($PROFILE_LIST[$selectedProfile])"
     }
 }
 
@@ -195,7 +191,7 @@ function Use-AtlassianPowerKit {
         [string] $ProfileName
     )
     Get-RequisitePowerKitModules
-    $env:AtlassianPowerKit_PROFILE_LIST = Get-AtlassianPowerKitProfileList
+    Write-Debug "Profile List: $(Get-AtlassianPowerKitProfileList)"
     if (!$ProfileName) {
         Write-Host 'No profile name provided. Check the profiles available.'
         $ProfileName = Show-AtlassianPowerKitProfileList
@@ -204,7 +200,7 @@ function Use-AtlassianPowerKit {
         $ProfileName = $ProfileName.Trim().ToLower()
         if (!($env:AtlassianPowerKit_PROFILE_LIST -contains $ProfileName)) {
             Write-Host 'Profile not found. Check the profiles available.'
-            Show-AtlassianPowerKitProfileList
+            $ProfileName = Show-AtlassianPowerKitProfileList
         }
     }
     if ($ProfileName -eq $false) {

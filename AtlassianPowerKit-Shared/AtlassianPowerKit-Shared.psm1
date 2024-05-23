@@ -357,8 +357,11 @@ function Get-AtlassianPowerKitProfileList {
     else {
         Write-Debug 'Vault already registered, getting profiles...'
         $PROFILE_LIST = (Get-SecretInfo -Vault $script:VAULT_NAME -Name '*').Name
-        (Get-SecretInfo -Vault $script:VAULT_NAME -Name '*').Name
-        $env:AtlassianPowerKit_PROFILE_LIST = $PROFILE_LIST
+        if ($PROFILE_LIST.Count -eq 0) {
+            Write-Debug 'No profiles found. Please create a new profile.'
+            return $false
+        }
     }
-    return [array]$PROFILE_LIST
+    $env:AtlassianPowerKit_PROFILE_LIST = $PROFILE_LIST
+    return $PROFILE_LIST
 }
