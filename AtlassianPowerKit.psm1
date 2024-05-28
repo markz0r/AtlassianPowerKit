@@ -49,6 +49,7 @@ function Show-AtlassianPowerKitFunctions {
 
     $colorIndex = 0
     $functionReferences = @{}
+    $functionReferences[0] = 'Return'
     $nestedModules | ForEach-Object {
         # Select a color from the list
         $color = $colors[$colorIndex % $colors.Count]
@@ -61,10 +62,11 @@ function Show-AtlassianPowerKitFunctions {
         Write-Host " Exported Commands:$spaces" -BackgroundColor "Dark$color" -ForegroundColor White -NoNewline
         Write-Host ' ' -BackgroundColor Black
         $_.ExportedCommands.Keys | ForEach-Object {
+            $colorIndex++
             # Assign a letter reference to the function
+            # $functRefNum = $colorIndex + 1
             $functRefNum = $colorIndex
             $functionReferences[$functRefNum] = $_
-
             Write-Host ' ' -NoNewline -BackgroundColor "Dark$color"
             Write-Host '   ' -NoNewline -BackgroundColor Black
             Write-Host "$functRefNum -> " -NoNewline -BackgroundColor Black
@@ -75,7 +77,6 @@ function Show-AtlassianPowerKitFunctions {
             Write-Host ' ' -NoNewline -BackgroundColor "Dark$color"
             Write-Host ' ' -BackgroundColor Black
             # Increment the color index for the next function
-            $colorIndex++
         }
         $spaces = ' ' * 59
         Write-Host $spaces -BackgroundColor "Dark$color" -NoNewline

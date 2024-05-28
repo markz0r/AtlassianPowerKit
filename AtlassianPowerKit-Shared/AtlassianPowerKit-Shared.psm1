@@ -51,7 +51,6 @@ function Unlock-Vault {
         [Parameter(Mandatory = $true)]
         [string]$VaultName
     )
-
     try {
         if ((Get-SecretVault | Where-Object IsDefault).Name -ne $script:VAULT_NAME) {
             Write-Debug "$script:VAULT_NAME is not the default vault. Setting as default..."
@@ -265,6 +264,7 @@ function Register-AtlassianPowerKitVault {
     }
     # Unlock the vault if it is locked
     try {
+        $VAULT_KEY = Get-VaultKey
         Unlock-Vault -VaultName $script:VAULT_NAME
     }
     catch {
@@ -356,6 +356,7 @@ function Get-AtlassianPowerKitProfileList {
     }
     else {
         Write-Debug 'Vault already registered, getting profiles...'
+        unlock-vault -VaultName $script:VAULT_NAME
         $PROFILE_LIST = (Get-SecretInfo -Vault $script:VAULT_NAME -Name '*').Name
         if ($PROFILE_LIST.Count -eq 0) {
             Write-Debug 'No profiles found. Please create a new profile.'
