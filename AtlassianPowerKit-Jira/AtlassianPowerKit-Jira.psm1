@@ -567,22 +567,47 @@ function Get-OpsgenieServices {
 function Get-JiraProjectIssuesTypes {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$JiraCloudProjectKey
+        [string]$JiraCloudProjectKey,
+        [Parameter(Mandatory = $false)]
+        [string]$OUTPUT_PATH = ".\$env:AtlassianPowerKit_PROFILE_NAME\"
     )
+    $FILENAME = "$env:AtlassianPowerKit_PROFILE_NAME-$JiraCloudProjectKey-IssueTypes-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+    if (-not (Test-Path $OUTPUT_PATH)) {
+        New-Item -ItemType Directory -Path $OUTPUT_PATH
+    }
+    $OUTPUT_FILE = "$OUTPUT_PATH$FILENAME"
+    Write-Debug "Output file: $OUTPUT_FILE"
+    # Initiate json file with { "Project": "$JiraCloudProjectKey", "JiraIssueTypes": [
+    $OUTPUT_FILE_HEADER = "{ `"Project`": `"$JiraCloudProjectKey`", `"JiraIssueTypes`": ["
+    $OUTPUT_FILE_HEADER | Out-File -FilePath $OUTPUT_FILE
     $REST_RESULTS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issue/createmeta/$JiraCloudProjectKey/issuetypes" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
     Write-Debug $REST_RESULTS.getType()
     foreach ($issueType in $REST_RESULTS.issueTypes) {
-        Write-Debug "############## Issue Type: $($issueType.name) ##############"
+        #Write-Debug "############## Issue Type: $($issueType.name) ##############"
         #Write-Debug "Issue Type: $($issueType | Get-Member -MemberType Properties)"
-        Write-Debug "Issue Type ID: $($issueType.id)"
+        #Write-Debug "Issue Type ID: $($issueType.id)"
         $ISSUE_FIELDS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issue/createmeta/$JiraCloudProjectKey/issuetypes/$($issueType.id)" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
-        Write-Debug (ConvertTo-Json $ISSUE_FIELDS -Depth 10)
-        Write-Debug '######################################################################'
+        #Write-Debug (ConvertTo-Json $ISSUE_FIELDS -Depth 10)
+        #Write-Debug '######################################################################'
+        # Append ConvertTo-Json $ISSUE_FIELDS -Depth 10 to the $OUTPUT_FILE
+        # Create a JSON object in file to hold the issue type fields
+        "{""Issue Type"": ""$($issueType.name)"", ""FieldInfo"":" | Out-File -FilePath $OUTPUT_FILE -Append
+        $ISSUE_FIELDS | ConvertTo-Json -Depth 10 | Out-File -FilePath $OUTPUT_FILE -Append
+        # Add a comma to the end of the file to separate the issue types
+        "}," | Out-File -FilePath $OUTPUT_FILE -Append
     }
-    #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
-    # $JiraProjectProperties | Get-Member -MemberType Properties | ForEach-Object {
-    #     Write-Debug "$($_.Name) - $($_.Definition) - ID: $($_.Definition.split('/')[-1])"
-    # }
+    # Remove the last comma from the file, replace with ]}, ensuring the entire line is written not repeated
+    $content = Get-Content $OUTPUT_FILE
+    $content[-1] = $content[-1] -replace '},', '}]}'
+    $PARSED = $content | ConvertFrom-Json
+    # Write the content back to the file ensuring JSON formatting is correc
+    $PARSED | ConvertTo-Json -Depth 30 | Set-Content $OUTPUT_FILE
+    Write-Debug "Issue Types found: "
+    $PARSED.JiraIssueTypes | ForEach-Object {
+        $CUSTOM_FIELD_COUNT = ($_.FieldInfo.fields | Where-Object { $_.key -like "customfield*" }).Count
+        Write-Debug "$($_.'Issue Type') - Field Count: $($_.'FieldInfo'.total), Custom Field Count: $CUSTOM_FIELD_COUNT"
+    }
+    Write-Debug "See Issue Types JSON file created: $OUTPUT_FILE"
 }
 
 # Function to get issue type metadata for a Jira Cloud project
