@@ -60,27 +60,27 @@ function Export-ConfluencePageStorageFormat {
         [int64]$CONFLUENCE_PAGE_ID
     )
     $CONFLUENCE_PAGE_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/wiki/api/v2/pages/$($CONFLUENCE_PAGE_ID)?body-format=storage"
-        Write-Debug "Exporting page storage format for page ID: $CONFLUENCE_PAGE_ID in space: $CONFLUENCE_SPACE_KEY... URL: $CONFLUENCE_PAGE_ENDPOINT ..."
-        try {
-            Write-Debug "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
-            Write-Debug "Confluence Page exporting: $CONFLUENCE_PAGE_ENDPOINT"
-            $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
-            Write-Debug $REST_RESULTS.getType()
-            Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
-            Write-Debug "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
-        } 
-        catch {
-            Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
-            Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
-        }
+    Write-Debug "Exporting page storage format for page ID: $CONFLUENCE_PAGE_ID in space: $CONFLUENCE_SPACE_KEY... URL: $CONFLUENCE_PAGE_ENDPOINT ..."
+    try {
+        Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+        Write-Debug "Confluence Page exporting: $CONFLUENCE_PAGE_ENDPOINT"
+        $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+        Write-Debug $REST_RESULTS.getType()
+        Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+        Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    } 
+    catch {
+        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
+        Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
+    }
     
     $CONFLUENCE_PAGE_STORAGE = $REST_RESULTS.body.storage.value
     $CONFLUENCE_PAGE_TITLE = $REST_RESULTS.title
     $CONFLUENCE_PAGE_TITLE_ENCODED = [System.Web.HttpUtility]::UrlEncode($CONFLUENCE_PAGE_TITLE)
     $CURRENT_DATE_TIME = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $FILE_NAME = ".\$($env:AtlassianPowerKit_PROFILE_NAME)\$CONFLUENCE_SPACE_KEY\pageid_$($CONFLUENCE_PAGE_TITLE_ENCODED)_$CURRENT_DATE_TIME.xml"
-    if (-not (Test-Path ".\$($env:AtlassianPowerKit_PROFILE_NAME)\$CONFLUENCE_SPACE_KEY")) {
-        New-Item -ItemType Directory -Path ".\$($env:AtlassianPowerKit_PROFILE_NAME)\$CONFLUENCE_SPACE_KEY"
+    $FILE_NAME = ".\$($env:AtlassianPowerKit_PROFILE_NAME)\$CONFLUENCE_SPACE_KEY\$CONFLUENCE_PAGE_TITLE_ENCODED\$($CONFLUENCE_PAGE_TITLE_ENCODED)_$CURRENT_DATE_TIME.xml"
+    if (-not (Test-Path ".\$($env:AtlassianPowerKit_PROFILE_NAME)\$CONFLUENCE_SPACE_KEY\$CONFLUENCE_PAGE_TITLE_ENCODED")) {
+        New-Item -ItemType Directory -Path ".\$($env:AtlassianPowerKit_PROFILE_NAME)\$CONFLUENCE_SPACE_KEY\$CONFLUENCE_PAGE_TITLE_ENCODED"
     }
     $CONFLUENCE_PAGE_STORAGE | Out-File -FilePath $FILE_NAME
     Write-Debug "Page storage format exported to: $FILE_NAME"
@@ -92,19 +92,27 @@ function Export-ConfluencePageStorageFormatForChildren {
         [Parameter(Mandatory = $true)]
         [string]$CONFLUENCE_SPACE_KEY,
         [Parameter(Mandatory = $true)]
-        [string]$CONFLUENCE_PARENT_PAGE_TITLE
+        [string]$CONFLUENCE_PARENT_PAGE_TITLE,
+        [Parameter(Mandatory = $false)]
+        [int]$DepthLimit = 0,
+        [Parameter(Mandatory = $false)]
+        [int]$DepthCount = 0
     )
     $PARENT_PAGE = Get-ConfluencePageByTitle -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_TITLE $CONFLUENCE_PARENT_PAGE_TITLE
-    if (-not $PARENT_PAGE) {
+    if (!$PARENT_PAGE) {
         throw "Parent page does not exist: $CONFLUENCE_PARENT_PAGE_TITLE"
     }
     $PARENT_PAGE_ID = $PARENT_PAGE.results[0].id
-    Write-Debug "Parent Page ID: $PARENT_PAGE_ID - getting child pages..."
+    Write-Debug "Parent Page ID: $PARENT_PAGE_ID, Title: $CONFLUENCE_PARENT_PAGE_TITLE, DepthCount: $DepthCount, DepthLimit: $DepthLimit - getting child pages..."
     $CHILD_PAGES = $(Get-ConfluenceChildPages -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -PARENT_ID $PARENT_PAGE_ID)
     Write-Debug "Found $($CHILD_PAGES.results.count) child pages..."
     $CHILD_PAGES.results | ForEach-Object {
         Write-Debug "Exporting page storage format for page ID: $($_.id) in space: $CONFLUENCE_SPACE_KEY..."
         Export-ConfluencePageStorageFormat -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_ID $($_.id)
+        if (($DepthLimit -eq 0) -or ($DepthCount -lt $DepthLimit)) {
+            $DepthCount++
+            Export-ConfluencePageStorageFormatForChildren -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PARENT_PAGE_TITLE $($_.title) -DepthLimit $DepthLimit -DepthCount $DepthCount
+        }
     }
 }
 
@@ -135,13 +143,13 @@ function Get-OSMPlaceholders {
         [Parameter(Mandatory = $true)]
         [string]$PATH_TO_STORAGE_EXPORTS,
         [Parameter(Mandatory = $false)]
-        [string]$PATTERN_TO_FIND
+        [array]$PATTERNS_TO_FIND
     )
-    if (-not $PATTERN_TO_FIND) {
-        $PATTERN_TO_FIND = '&lt;&lt;.*?&gt;&gt;'
-        Write-Debug "No pattern provided, using default: $PATTERN_TO_FIND"
+    if (-not $PATTERNS_TO_FIND) {
+        $PATTERNS_TO_FIND = @('&lt;&lt;.*?&gt;&gt;', 'zoak-osm.([^\s,]+)', '([^\s,]+)to(.*)be(.*)replaced([^\s,]+)')
+        Write-Debug "No pattern provided, using default: $PATTERNS_TO_FIND"
     }
-
+    Write-Debug "Checking path $PATH_TO_STORAGE_EXPORTS for files..."
     # Check if the directory exists and contains files
     if (-not (Test-Path $PATH_TO_STORAGE_EXPORTS)) {
         Write-Debug "Directory does not exist or is empty: $PATH_TO_STORAGE_EXPORTS"
@@ -150,29 +158,44 @@ function Get-OSMPlaceholders {
     # For each file in the directory, get the content and extract the placeholders
     Write-Debug "Getting placeholders from files in: $($(Get-ChildItem -Recurse -Path $PATH_TO_STORAGE_EXPORTS -Filter *.xml ).FullName)"
     $PLACEHOLDERS = @()
+    $CLEAN_FILES = @()
     Get-ChildItem -Path $PATH_TO_STORAGE_EXPORTS -Recurse -Filter *.xml | ForEach-Object {
-        $content = Get-Content $_.FullName
-        $placeholder = $content | Select-String -Pattern $PATTERN_TO_FIND -AllMatches | ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
-        if ($PATTERN_TO_FIND -eq '&lt;&lt;.*?&gt;&gt;') {
-            $placeholder = $placeholder | ForEach-Object { $_ -replace '&lt;&lt;', 'PLACEHOLDER_' -replace '&gt;&gt;', ' ' }
-        }
-        #Write-Debug "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
         $FILE = $_
-        #Write-Debug "Placeholders found in file: $($FILE.FullName) :"
-        #$placeholder | ForEach-Object { Write-Debug "$FILE.FullName: $_"; $PLACEHOLDERS += ,($($FILE.NAME),$_)}
-        $placeholder | ForEach-Object {$PLACEHOLDERS += ,($($FILE.NAME),$_)}
-        #Write-Debug "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+        $content = Get-Content $FILE.FullName
+        $PATTERNS_TO_FIND | ForEach-Object {
+            $placeholder = $content | Select-String -Pattern $_ -AllMatches | ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
+            if ($_ -eq '&lt;&lt;.*?&gt;&gt;') {
+                if ($placeholder) {
+                    $placeholder_ref = $placeholder | ForEach-Object { $_ -replace '&lt;&lt;', 'PLACEHOLDER_' -replace '&gt;&gt;', ' ' }
+                    $placeholder = "$placeholder_ref ($placeholder)"
+                }
+            }
+            Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+            if ($placeholder) {
+                $placeholder | ForEach-Object { 
+                    # Write output in red
+                    Write-Host "#### PLACEHOLDER FOUND!!! See: $($FILE.FullName): $_" -ForegroundColor Red
+                    $PLACEHOLDERS += , ($($FILE.NAME), $_) }
+            }
+            else {
+                Write-Debug "No placeholders found in file: $($FILE.FullName)"
+                $CLEAN_FILES += $FILE
+            }
+            Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+        }
     }
-    #$PLACEHOLDERS = $PLACEHOLDERS | Sort-Object -Unique
-    #Write-Debug "Placeholders: $($PLACEHOLDERS | ForEach-Object {'Found: ' + $_ }| Out-String)"
-    Write-Debug "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
-    Write-Debug "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
-    Write-Debug "FULL LIST:"
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug 'CLEAN FILES:'
+    $CLEAN_FILES | ForEach-Object { Write-Debug $_.FullName }
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug 'FULL LIST:'
     $PLACEHOLDERS | ForEach-Object { Write-Debug "$($_[0]): $($_[1])" }
-    Write-Debug "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
-    Write-Debug "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
-    #$PLACEHOLDERS
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
 }
+
 
 # Function to convert a JSON file of JIRA issues to a Confluence page table in storage format
 function Convert-JiraIssuesToConfluencePageTable {

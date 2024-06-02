@@ -87,40 +87,45 @@ function Show-AtlassianPowerKitFunctions {
     Write-Host "`n" -BackgroundColor Black
     Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -BackgroundColor Black -ForegroundColor DarkGray
     # Ask the user which function they want to run
-    $selectedFunction = Read-Host -Prompt "`nSelect a function to run (or hit enter to exit):"
+    # if the user hits enter, exit the function
     # Attempt to convert the input string to a char
     try {
+        $selectedFunction = Read-Host -Prompt "`nSelect a function to run (or hit enter to exit)"
         $selectedFunction = [int]$selectedFunction
     }
     catch {
-        if (!$selectedFunction) {
-            return $true
-        }
-        Write-Host 'Invalid selection. Please try again.'
-        Show-AtlassianPowerKitFunctions
+        return $null
     }
-    # Run the selected function timing the execution
-    Write-Host "`n"
-    Write-Host "You selected:  $($functionReferences.$selectedFunction)" -ForegroundColor Green
-    try {     
-        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        Invoke-Expression ($functionReferences.$selectedFunction)
-        $stopwatch.Stop()
-    }
-    catch {
-        # Write all output including errors to the console from the selected function
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        throw "Error running function: $functionReferences[$selectedFunction] failed. Exiting."
-    }
-    finally {
-        Write-Host "`nFunction $($functionReferences.$selectedFunction) completed - execution time: $($stopwatch.Elapsed.TotalSeconds) seconds" -ForegroundColor Green
-        $runAnother = Read-Host 'Run another function? (Y/any key to exit)'
-        # Ask the user if they want to run another function
-    } if ($runAnother -eq 'Y') {
-        Show-AtlassianPowerKitFunctions 
-    }
+    # if selected function is Return, exit the function
+    if (!$selectedFunction -or ($selectedFunction -eq 0)) {
+        return $null
+    } 
     else {
-        Write-Host 'Have a great day!'
+    # Run the selected function timing the execution
+        Write-Host "`n"
+        Write-Host "You selected:  $($functionReferences.$selectedFunction)" -ForegroundColor Green
+        try {     
+            $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+            Invoke-Expression ($functionReferences.$selectedFunction)
+            $stopwatch.Stop()
+        }
+        catch {
+            # Write all output including errors to the console from the selected function
+            Write-Host $_.Exception.Message -ForegroundColor Red
+            throw "Error running function: $functionReferences[$selectedFunction] failed. Exiting."
+        }
+        Write-Host "`nFunction $($functionReferences.$selectedFunction) completed - execution time: $($stopwatch.Elapsed.TotalSeconds) seconds" -ForegroundColor Green
+        # Ask the user if they want to run another function
+        Write-Host "`n"
+        try {
+            $runAnother = Read-Host 'Run another function? (Y / Return to exit)'
+            if (($runAnother) -and ($runAnother -eq 'Y')) {
+                Show-AtlassianPowerKitFunctions
+            }
+        }
+        catch {
+            return $null
+        }
     }
 }
 
@@ -166,15 +171,21 @@ function Show-AtlassianPowerKitProfileList {
     }   
     Write-Host '[N] Create a new profile'
     Write-Host '[R] Reset vault and profiles - Deletes all profiles and vault data'
-    Write-Host '[Q] Quit'
+    Write-Host '[Q / Return] Quit'
     Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -ForegroundColor DarkGray
-    $selectedProfile = Read-Host 'Select a profile to use or create a new profile'
-    if ($selectedProfile -eq 'N') {
+    try {
+        # read input from the user and just break with no error if the input is not a number, 'N', 'R' or 'Q'
+        $selectedProfile = Read-Host 'Select a profile number or action'
+    }
+    catch {
+        return $null
+    }
+    if ((!$selectedProfile) -or ($selectedProfile -eq 'Q')) {
+        return $null
+    }
+    elseif ($selectedProfile -eq 'N') {
         New-AtlassianPowerKitProfile
     } 
-    elseif ($selectedProfile -eq 'Q') {
-        Write-Host 'Exiting...'
-    }
     elseif ($selectedProfile -eq 'R') {
         Clear-AtlassianPowerKitVault
     }
@@ -192,24 +203,34 @@ function Use-AtlassianPowerKit {
         [string] $ProfileName
     )
     Get-RequisitePowerKitModules
-    Write-Debug "Profile List: $(Get-AtlassianPowerKitProfileList)"
+    $env:AtlassianPowerKit_PROFILE_NAME = $null
+    #Write-Debug "Profile List: $(Get-AtlassianPowerKitProfileList)"
     if (!$ProfileName) {
         Write-Host 'No profile name provided. Check the profiles available.'
-        $ProfileName = Show-AtlassianPowerKitProfileList
-    }
-    else {
-        $ProfileName = $ProfileName.Trim().ToLower()
-        if (!($env:AtlassianPowerKit_PROFILE_LIST -contains $ProfileName)) {
-            Write-Host 'Profile not found. Check the profiles available.'
+        try {
             $ProfileName = Show-AtlassianPowerKitProfileList
+            Set-AtlassianPowerKitProfile $ProfileName
+        }
+        catch {
+            Write-Host 'No profile selected. Exiting...'
+            return $null
         }
     }
-    if ($ProfileName -eq $false) {
-        Write-Host 'No profile selected. Exiting...'
-        return $null
-    }
     else {
-        Set-AtlassianPowerKitProfile -ProfileName $ProfileName
+        try {
+            $ProfileName = $ProfileName.Trim().ToLower()
+            Write-Debug "Setting provided profile: $ProfileName"
+            Set-AtlassianPowerKitProfile $ProfileName
+            if (!$env:AtlassianPowerKit_PROFILE_NAME -or ($env:AtlassianPowerKit_PROFILE_NAME -ne $ProfileName)) {
+                Throw 'Profile not loaded! Exiting...'
+            }
+        }
+        catch {
+            #Write-Host 'No profile selected. Exiting...'
+            return $null
+        }
+    }
+    if ($env:AtlassianPowerKit_PROFILE_NAME) {
         Write-Host "Profile loaded: $($env:AtlassianPowerKit_PROFILE_NAME)"
         Show-AtlassianPowerKitFunctions
     }
