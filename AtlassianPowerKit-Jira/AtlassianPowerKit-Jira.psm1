@@ -82,72 +82,79 @@ function Get-JiraIssueChangeNullsFromJQL {
 function Get-JSONFieldsWithData {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$JSON_FILE_PATH
+        [string]$FILE_PATH
     )
-    $EXCLUDED_FIELDS = @('Time to resolution', 'Time to first response', 'customfield_10062', 'assignee', 'aggregatetimeoriginalestimate', 'aws-json-field__ad4c4b0c-406f-47c1-a8e3-df46e38dabf2', 'customfield_10291', 'customfield_10292', 'customfield_10294', 'customfield_10295', 'reporter' )
+    $EXCLUDED_FIELDS = @('Time to resolution', 'Time to first response', 'customfield_10062', 'assignee', 'aggregatetimeoriginalestimate',
+        'aws-json-field__ad4c4b0c-406f-47c1-a8e3-df46e38dabf2', 'customfield_10291', 'customfield_10292', 'customfield_10294', 'customfield_10295', 'reporter'
+        'progress', 'issuetype', 'project', 'customfield_10036', 'watches', 'customfield_10018', 'customfield_10019', 'updated', 'customfield_10010', 'customfield_10011', 'currentStatus', 'timetracking',
+        'aws-json-field__b72236ec-c3c4-43ea-a646-84d08f224ab5', 'statuscategorychangedate', 'versions', 'timeestimate', 'status', 'creator', 'aggregateprogress', 'workratio', 'issuerestriction', 'created')
     $DATA_FIELD_LIST = @{}
-    $JSON_OBJECT = Get-Content -Path $JSON_FILE_PATH | ConvertFrom-Json -Depth 30
+    # For each json file in the directory, get the content and extract the fields
     # Write a sub-function that gets all fields in a JSON object array that are not null, adding the field to a hash table with key as the field name and value as the field value, if the key already exists, skip, the function takes a JSON object array as a parameter if the field is an object, write the field name and object type is an object, if the field is an array, write the field name and object type is an array, call self with the array as a parameter
     function Search-JSONObjectArray {
         param (
             [Parameter(Mandatory = $true)]
             [object]$JSON_OBJECT
         )
+        $JIRA_FIELD_ARRAY = Get-JiraFields -SUPRESS_OUTPUT
+        $JSON_OBJECT = $JSON_OBJECT | ConvertFrom-Json -Depth 30
         $JSON_OBJECT | ForEach-Object {
             $OBJECT = $_
-            $OBJECT.PSObject.Properties | ForEach-Object {
-                if ($null -eq $_.Value -or $_.Key -in $EXCLUDED_FIELDS -or $_.Name -in $EXCLUDED_FIELDS) {
+            # Create a hash table of the 'fields' nested object
+            $FIELDS = $OBJECT.fields
+            # For each item in the fields, get the field name and value
+            $FIELDS.PSObject.Properties | ForEach-Object {
+                $FIELD = $_
+                #Write-Debug "Processing field: $FIELD"
+                #Write-Debug "Processing field: Name: $($FIELD.Name) - Value: $($FIELD.Value)"
+                if ((!$FIELD.Value) -or ($FIELD.Value -eq 'null') -or ($FIELD.Name -in $EXCLUDED_FIELDS)) {
                     return
                 }
-                if ($_.Value -is [object]) {
-                    if ($_.Value -is [array]) {
-                        #Write-Debug "Field: $($_.Name) - Type: array"
-                        Search-JSONObjectArray -JSON_OBJECT $_.Value
-                    }
-                    else {
-                        #Write-Debug "Field: $($_.Name) - Type: object"
-                        Search-JSONObjectArray -JSON_OBJECT $_.Value
-                    }
-                }
                 else {
-                    if (-not $DATA_FIELD_LIST.ContainsKey($_.Name)) {
-                        $DATA_FIELD_LIST[$_.Name] = $_.Value
+                    #Write-Debug '######'
+                    #Write-Debug "Field with data: $($FIELD.Name)"
+                    $FIELD_INFO = $JIRA_FIELD_ARRAY | Where-Object { $_.id -eq $FIELD.Name }
+                    #Write-Debug "Field with data, field info name: $($FIELD_INFO.name)"
+                    #Write-Debug "$($($FIELD.Name, $FIELD_INFO, $($FIELD.Value)).ToString())"
+                    if (!(($DATA_FIELD_LIST.Count -gt 0) -and ($DATA_FIELD_LIST.ContainsKey($FIELD_INFO.name)))) {
+                        #Write-Debug "Adding new field to DATA_FIELD_LIST: $FIELD.Name ----> $FIELD_INFO.name"
+                        $DATA_FIELD_LIST[$($FIELD_INFO.name)] = "$($FIELD_INFO.name), $($FIELD.Name), $($($FIELD_INFO | ConvertTo-Json -Depth 1 -Compress) -replace(',', ' ')), $($($($FIELD.Value) | ConvertTo-Json -Depth 1 -Compress) -replace(',', ' '))"
                     }
+                    #Write-Debug '######'
                 }
             }
         }
     }
-    Search-JSONObjectArray -JSON_OBJECT $JSON_OBJECT
-    Write-Debug 'Fields with data:'
-    $DATA_FIELD_LIST.GetEnumerator() | ForEach-Object {
-        Write-Debug "$($_.Key): $($_.Value)"
+    Get-ChildItem -Path $FILE_PATH -Recurse -Filter *.json | ForEach-Object {
+        $FILE = $_
+        Write-Debug "Processing file: $($FILE.FullName)"
+        $JSON_OBJECT = Get-Content -Path $_.FullName -Raw
+        Search-JSONObjectArray -JSON_OBJECT $JSON_OBJECT
     }
-}
-
-
-
-# Function to remove fields from JSON object array, writing a filtered JSON object array to a file, fields to retain as an array parameter
-function Select-JSONExportDataFields {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$JSON_FILE_PATH,
-        [Parameter(Mandatory = $true)]
-        [string[]]$FIELDS_TO_RETAIN
-    )
-    $JSON_OBJECT = Get-Content -Path $JSON_FILE_PATH | ConvertFrom-Json -Depth 30
-    $JSON_FILE_PATH = $JSON_FILE_PATH -replace '.json', '-Filtered.json'
-    $JSON_OBJECT | ForEach-Object {
-        $OBJECT = $_
-        $OBJECT.PSObject.Properties | ForEach-Object {
-            if (-not $FIELDS_TO_RETAIN.Contains($_.Name)) {
-                $OBJECT.PSObject.Properties.Remove($_.Name)
-            }
-        }
-
+    # Write $DATA_FIELD_LIST to a file
+    $OUTPUT_FILE = "$env:AtlassianPowerKit_PROFILE_NAME\$env:AtlassianPowerKit_PROFILE_NAME-FieldsWithData-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+    if (-not (Test-Path $OUTPUT_FILE)) {
+        New-Item -ItemType File -Path $OUTPUT_FILE -Force | Out-Null
     }
-    $JSON_OBJECT | ConvertTo-Json -Depth | Out-File -FilePath $JSON_FILE_PATH
+    # Write the field list to a CSV file with headers
+    $CSV_DATA = @() 
+    $CSV_DATA += 'Field Name, Field ID, Field Info, Field Value'
+    # sort the data field list by field name and write values to the CSV file
+    Write-Debug "DATA_FIELD_LIST: $($DATA_FIELD_LIST.GetType())"
+    Write-Debug "Fields with data: $($DATA_FIELD_LIST.Count)"
+    $DATA_FIELD_LIST.GetEnumerator() | Sort-Object -Property Name | ForEach-Object {
+        # Write each of the array values to the CSV file
+        # Make a csv entry for the value object
+        $Entry = $_.Value
+        Write-Debug "Entry: $Entry"
+        Write-Debug "Entry Type: $($Entry.GetType())"
+        $CSV_DATA += $Entry
+    }
+    Write-Debug "CSV_DATA: $CSV_DATA"
+    Write-Debug "CSV_DATA: $($CSV_DATA.GetType())"
+    $CSV_DATA | Out-File -FilePath $OUTPUT_FILE -Append
+    Write-Debug "Fields with data written to: $((Get-Item -Path $OUTPUT_FILE).Directory.FullName)"
 }
-
 
 # Function to Export all Get-JiraCloudJQLQueryResult to a JSON file
 function Export-JiraCloudJQLQueryResultsToJSON {
@@ -344,6 +351,58 @@ function Get-JiraCloudJQLQueryResult {
     return $ISSUES_LIST
 }
 
+# Function to extract all of the UNIQUE Placeholders from a Confluence page storage format, the placeholders are in the format of &lt;&lt;Tsfdalsdkfj&gt;&gt; - read the confluence storage data from file and return an array of unique placeholders
+function Get-OSMPlaceholdersJira {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$PATH_TO_STORAGE_EXPORTS,
+        [Parameter(Mandatory = $false)]
+        [array]$PATTERNS_TO_FIND
+    )
+    if (-not $PATTERNS_TO_FIND) {
+        $PATTERNS_TO_FIND = @('&lt;&lt;.*?&gt;&gt;', 'zoak-osm.([^\s,]+)', '([^\s,]+)to(.*)be(.*)replaced([^\s,]+)')
+        Write-Debug "No pattern provided, using default: $PATTERNS_TO_FIND"
+    }
+    Write-Debug "Checking path $PATH_TO_STORAGE_EXPORTS for files..."
+    # Check if the directory exists and contains files
+    if (-not (Test-Path $PATH_TO_STORAGE_EXPORTS)) {
+        Write-Debug "Directory does not exist or is empty: $PATH_TO_STORAGE_EXPORTS"
+        return
+    }
+    # For each file in the directory, get the content and extract the placeholders
+    $PLACEHOLDERS = @()
+    $CLEAN_FILES = @()
+    Get-ChildItem -Path $PATH_TO_STORAGE_EXPORTS -Recurse -Filter *.json | ForEach-Object {
+        $FILE = $_
+        $content = Get-Content $FILE.FullName
+        $PATTERNS_TO_FIND | ForEach-Object {
+            $placeholder = $content | Select-String -Pattern $_ -AllMatches | ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
+            Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+            if ($placeholder) {
+                $placeholder | ForEach-Object { 
+                    # Write output in red
+                    Write-Host "#### PLACEHOLDER FOUND!!! See: $($FILE.FullName): $_" -ForegroundColor Red
+                    $PLACEHOLDERS += , ($($FILE.NAME), $_) }
+            }
+            else {
+                Write-Debug "No placeholders found in file: $($FILE.FullName)"
+                $CLEAN_FILES += $FILE
+            }
+            Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+        }
+    }
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug 'CLEAN FILES:'
+    $CLEAN_FILES | ForEach-Object { Write-Debug $_.FullName }
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug 'FULL LIST:'
+    $PLACEHOLDERS | ForEach-Object { Write-Debug "$($_[0]): $($_[1])" }
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+}
+
 # Function to get change log for a Jira issue
 function Get-JiraIssueChangeLog {
     param (
@@ -447,9 +506,22 @@ function Get-JiraIssueChangeNulls {
 
 # Function to list fields with field ID and field name for a Jira Cloud instance
 function Get-JiraFields {
+    param (
+        [Parameter(Mandatory = $false)]
+        [switch]$SUPRESS_OUTPUT = $false
+    )
     $REST_RESULTS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/field" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
     #Write-Debug $REST_RESULTS.getType()
     #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+    # Write a file with the results to $env:AtlantisPowerKit_PROFILE_NAME-JIRAFields-YYYYMMDD-HHMMSS.json
+    if (-not $SUPRESS_OUTPUT) {
+        $OUTPUT_FILE = "$env:AtlassianPowerKit_PROFILE_NAME\$env:AtlassianPowerKit_PROFILE_NAME-JIRAFields-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+        if (-not (Test-Path $OUTPUT_FILE)) {
+            New-Item -ItemType File -Path $OUTPUT_FILE
+        }
+        $REST_RESULTS | ConvertTo-Json -Depth 10 | Out-File -FilePath $OUTPUT_FILE
+        Write-Debug "Jira Fields written to: $OUTPUT_FILE"
+    }
     return $REST_RESULTS
 }
 
@@ -594,7 +666,7 @@ function Get-JiraProjectIssuesTypes {
         "{""Issue Type"": ""$($issueType.name)"", ""FieldInfo"":" | Out-File -FilePath $OUTPUT_FILE -Append
         $ISSUE_FIELDS | ConvertTo-Json -Depth 10 | Out-File -FilePath $OUTPUT_FILE -Append
         # Add a comma to the end of the file to separate the issue types
-        "}," | Out-File -FilePath $OUTPUT_FILE -Append
+        '},' | Out-File -FilePath $OUTPUT_FILE -Append
     }
     # Remove the last comma from the file, replace with ]}, ensuring the entire line is written not repeated
     $content = Get-Content $OUTPUT_FILE
@@ -602,9 +674,9 @@ function Get-JiraProjectIssuesTypes {
     $PARSED = $content | ConvertFrom-Json
     # Write the content back to the file ensuring JSON formatting is correc
     $PARSED | ConvertTo-Json -Depth 30 | Set-Content $OUTPUT_FILE
-    Write-Debug "Issue Types found: "
+    Write-Debug 'Issue Types found: '
     $PARSED.JiraIssueTypes | ForEach-Object {
-        $CUSTOM_FIELD_COUNT = ($_.FieldInfo.fields | Where-Object { $_.key -like "customfield*" }).Count
+        $CUSTOM_FIELD_COUNT = ($_.FieldInfo.fields | Where-Object { $_.key -like 'customfield*' }).Count
         Write-Debug "$($_.'Issue Type') - Field Count: $($_.'FieldInfo'.total), Custom Field Count: $CUSTOM_FIELD_COUNT"
     }
     Write-Debug "See Issue Types JSON file created: $OUTPUT_FILE"
