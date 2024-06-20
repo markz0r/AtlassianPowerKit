@@ -153,50 +153,77 @@ function Get-JSONFieldsWithData {
     $EXCLUDED_FIELDS = @('Time to resolution', 'Time to first response', 'customfield_10062', 'assignee', 'aggregatetimeoriginalestimate',
         'aws-json-field__ad4c4b0c-406f-47c1-a8e3-df46e38dabf2', 'customfield_10291', 'customfield_10292', 'customfield_10294', 'customfield_10295', 'reporter'
         'progress', 'issuetype', 'project', 'customfield_10036', 'watches', 'customfield_10018', 'customfield_10019', 'updated', 'customfield_10010', 'customfield_10011', 'currentStatus', 'timetracking',
-        'aws-json-field__b72236ec-c3c4-43ea-a646-84d08f224ab5', 'statuscategorychangedate', 'versions', 'timeestimate', 'status', 'creator', 'aggregateprogress', 'workratio', 'issuerestriction', 'created')
+        'aws-json-field__b72236ec-c3c4-43ea-a646-84d08f224ab5', 'statuscategorychangedate', 'versions', 'timeestimate', 'status', 'creator', 'aggregateprogress', 'workratio', 'issuerestriction', 'created', 'votes', 'customfield_10022', 'lastViewed', 'customfield_10074', 'customfield_10073', 'customfield_10061', 'customfield_10060', 'customfield_10142')
     $DATA_FIELD_LIST = @{}
+    $JIRA_FIELD_ARRAY = Get-JiraFields
+    Write-Host "JIRA_FIELD_ARRAY: $($JIRA_FIELD_ARRAY.Count)"
+    $JIRA_FIELD_ARRAY | ForEach-Object {
+        Write-Debug "JIRA_FIELD_ARRAY: $($_.name), $($_.id), $($_.custom)"
+    } 
     # For each json file in the directory, get the content and extract the fields
     # Write a sub-function that gets all fields in a JSON object array that are not null, adding the field to a hash table with key as the field name and value as the field value, if the key already exists, skip, the function takes a JSON object array as a parameter if the field is an object, write the field name and object type is an object, if the field is an array, write the field name and object type is an array, call self with the array as a parameter
     function Search-JSONObjectArray {
         param (
             [Parameter(Mandatory = $true)]
-            [object]$JSON_OBJECT
+            [string]$RAW_JSON
         )
-        $JIRA_FIELD_ARRAY = Get-JiraFields -SUPRESS_OUTPUT
-        $JSON_OBJECT = $JSON_OBJECT | ConvertFrom-Json -Depth 30
-        $JSON_OBJECT | ForEach-Object {
-            $OBJECT = $_
-            # Create a hash table of the 'fields' nested object
-            $FIELDS = $OBJECT.fields
-            # For each item in the fields, get the field name and value
-            $FIELDS.PSObject.Properties | ForEach-Object {
+        #Write-Debug "Processing JSON_OBJECT: $($JSON_OBJECT.GetType())"
+        $JSON_OBJECT = $RAW_JSON | ConvertFrom-Json -Depth 40
+        Write-Debug "Processing JSON_OBJECT: $($($JSON_OBJECT).GetType())"
+        Write-Debug "Search-JSONObjectArray -- Issues Count: $($JSON_OBJECT.issues.Count)"
+        
+        $JSON_OBJECT.issues.fields | ForEach-Object {
+            $FIELDS = $_
+            #Write-Debug "Processing fields: $($FIELDS.GetType())"
+            #Write-Debug "Fields: $($FIELDS.Count)"
+            #Write-Debug "Fields: $($FIELDS)"
+            Write-Debug 'Converting to Hashtable...'
+        
+            $FIELDSHashtable = @{}
+            $FIELDS | ForEach-Object { $_.psobject.properties } | ForEach-Object { $FIELDSHashtable[$_.Name] = $_.Value }
+            Write-Debug "FieldsHashtable Type: $($FIELDSHashtable.GetType())"
+            Write-Debug "FieldsHashtable Count: $($FIELDSHashtable.Count)"
+            Write-Output $FIELDSHashtable
+            
+            #Write-Debug 'Skipping enumeration...'
+            #return $false
+            $FIELDSHashtable.GetEnumerator() | ForEach-Object {
                 $FIELD = $_
-                #Write-Debug "Processing field: $FIELD"
-                #Write-Debug "Processing field: Name: $($FIELD.Name) - Value: $($FIELD.Value)"
-                if ((!$FIELD.Value) -or ($FIELD.Value -eq 'null') -or ($FIELD.Name -in $EXCLUDED_FIELDS)) {
-                    return
+                Write-Debug "Processing field: $FIELD"
+                if ((!$FIELD.Value) -or ($FIELD.Key -in $EXCLUDED_FIELDS)) {
+                    Write-Debug "Field without data: $FIELD)"
                 }
                 else {
-                    #Write-Debug '######'
-                    #Write-Debug "Field with data: $($FIELD.Name)"
-                    $FIELD_INFO = $JIRA_FIELD_ARRAY | Where-Object { $_.id -eq $FIELD.Name }
-                    #Write-Debug "Field with data, field info name: $($FIELD_INFO.name)"
-                    #Write-Debug "$($($FIELD.Name, $FIELD_INFO, $($FIELD.Value)).ToString())"
-                    if (!(($DATA_FIELD_LIST.Count -gt 0) -and ($DATA_FIELD_LIST.ContainsKey($FIELD_INFO.name)))) {
-                        #Write-Debug "Adding new field to DATA_FIELD_LIST: $FIELD.Name ----> $FIELD_INFO.name"
-                        $DATA_FIELD_LIST[$($FIELD_INFO.name)] = "$($FIELD_INFO.name), $($FIELD.Name), $($($FIELD_INFO | ConvertTo-Json -Depth 1 -Compress) -replace(',', ' ')), $($($($FIELD.Value) | ConvertTo-Json -Depth 1 -Compress) -replace(',', ' '))"
+                    Write-Debug '######'
+                    Write-Debug "Field with data: $($FIELD | ConvertTo-Json -Depth 10)"
+                    $FIELD_INFO = $JIRA_FIELD_ARRAY | Where-Object { $_.id -eq $FIELD.Key }
+                    Write-Debug "Field with data, field info name: $($FIELD_INFO.name)"
+                    Write-Debug "$($($FIELD.Name, $FIELD_INFO, $($FIELD.Value)).ToString())"
+                    if (!(($DATA_FIELD_LIST.Count -gt 0) -and ($DATA_FIELD_LIST.ContainsKey($FIELD_INFO.Key)))) {
+                        Write-Debug "Adding new field to DATA_FIELD_LIST: $FIELD.Name ----> $FIELD_INFO.name"
+                        $DATA_FIELD_LIST[$($FIELD_INFO.name)] = "$($FIELD_INFO.name), $($FIELD.Name), $($($FIELD_INFO | ConvertTo-Json -Depth 2 -Compress) -replace(',', ' ')), $($($($FIELD.Value) | ConvertTo-Json -Depth 1 -Compress) -replace(',', ' '))"
                     }
-                    #Write-Debug '######'
                 }
             }
         }
+        return $DATA_FIELD_LIST
     }
-    Get-ChildItem -Path $FILE_PATH -Recurse -Filter *.json | ForEach-Object {
-        $FILE = $_
-        Write-Debug "Processing file: $($FILE.FullName)"
-        $JSON_OBJECT = Get-Content -Path $_.FullName -Raw
-        Search-JSONObjectArray -JSON_OBJECT $JSON_OBJECT
+    # Check file exists and is valid json
+    Write-Debug "Processing file: $($FILE_PATH)"
+    if (-not (Test-Path $FILE_PATH)) {
+        Write-Error "File not found: $($FILE_PATH)"
     }
+    else {
+        $RAW_JSON_STRING = Get-Content -Path $FILE_PATH -Raw
+        Write-Debug "Raw JSON String:  $($RAW_JSON_STRING.GetType())"
+        $JSON_OBJECT_ARRAY = $RAW_JSON_STRING | ConvertFrom-Json -Depth 40
+        Write-Debug "JSON_OBJECT_ARRAY: $JSON_OBJECT_ARRAY.GetType()"
+        Write-Output "Issue Count: $($JSON_OBJECT_ARRAY.issues.Count)"
+        Write-Debug 'FILE_CONTENT read successfully on surface. Processing JSON_OBJECT_ARRAY...'
+        Search-JSONObjectArray -RAW_JSON $RAW_JSON_STRING
+    }
+
+
     # Write $DATA_FIELD_LIST to a file
     $OUTPUT_FILE = "$env:AtlassianPowerKit_PROFILE_NAME\$env:AtlassianPowerKit_PROFILE_NAME-FieldsWithData-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
     if (-not (Test-Path $OUTPUT_FILE)) {
@@ -222,6 +249,22 @@ function Get-JSONFieldsWithData {
     Write-Debug "Fields with data written to: $((Get-Item -Path $OUTPUT_FILE).Directory.FullName)"
 }
 
+function Get-JIRAFieldMap {
+    # Create a hash table of Jira fields with the field key as the key and the field name as the value
+    $JIRA_FIELDS = Get-JiraFields
+    $JIRA_FIELD_MAPS = @{}
+    $JIRA_FIELDS | ForEach-Object {
+        if (!$_.id -or !$_.name) {
+            Write-Debug "Field ID not found for field: $_.ToString"
+        }
+        else {
+            Write-Debug "Adding field to JIRA_FIELD_MAPS: $($_.id) - $($_.name)"
+            $JIRA_FIELD_MAPS[$_.id] = $_.name
+        }
+    }
+    return $JIRA_FIELD_MAPS
+}
+
 # Function to Export all Get-JiraCloudJQLQueryResult to a JSON file
 function Export-JiraCloudJQLQueryResultsToJSON {
     param (
@@ -230,15 +273,10 @@ function Export-JiraCloudJQLQueryResultsToJSON {
         [Parameter(Mandatory = $false)]
         [string]$JSON_FILE_PATH
     )
-    $JIRA_FIELDS = Get-JiraFields
-    $JIRA_FIELDS | ForEach-Object {
-        Write-Debug "id: $($_.id), key: $($_.key), name: $($_.name)"
-    }
-    # Create a hash table of Jira fields with the field key as the key and the field name as the value
-    $JIRA_FIELD_MAPS = @{}
-    $JIRA_FIELDS | ForEach-Object {
-        $JIRA_FIELD_MAPS[$_.id] = $_.name
-    }
+    
+    Write-Debug 'Getting JIRA_FIELD_MAPS hash table...'
+    $JIRA_FIELD_MAPS = Get-JIRAFieldMap
+
     # Get the JQL query results and provide the JSON file path if it is defined
     Write-Debug 'Exporting JQL query results to JSON'
     # Advise the user if the JSON file path is not defined so only the results are displayed
@@ -252,7 +290,7 @@ function Export-JiraCloudJQLQueryResultsToJSON {
     }
     Write-Debug "JQL Query: $JQL_STRING running..."
     # wait for Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -JSON_FILE_PATH $JSON_FILE_PATH to complete and return the results to $REST_RESULTS
-    $REST_RESULTS = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -JSON_FILE_PATH $JSON_FILE_PATH -JIRA_FIELD_MAPS $JIRA_FIELD_MAPS
+    $REST_RESULTS = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -JIRA_FIELD_MAPS $JIRA_FIELD_MAPS
     Write-Debug "Total Results: $($REST_RESULTS.total), export complete."
     return $REST_RESULTS
 }

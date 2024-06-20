@@ -9,7 +9,7 @@
 @{
 
     # Script module or binary module file associated with this manifest.
-    RootModule        = 'AtlassianPowerKit-Jira.psm1'
+    RootModule        = 'AtlassianPowerKit-GRCosm.psm1'
 
     # Version number of this module.
     ModuleVersion     = '1.0.0'
@@ -51,7 +51,7 @@
     # ProcessorArchitecture = ''
 
     # Modules that must be imported into the global environment prior to importing this module
-    # RequiredModules = @()
+    # RequiredModules   = @('..\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1', '..\AtlassianPowerKit-Jira\AtlassianPowerKit-Jira.psd1')
 
     # Assemblies that must be loaded prior to importing this module
     # RequiredAssemblies = @()
@@ -70,7 +70,13 @@
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
     FunctionsToExport = @(
-        'Get-OSMPlaceholdersJira'
+        'Get-SharePointFileMetadata',
+        'New-ConfluencePolicyViewerSharePoint',
+        'Get-OSMPlaceholdersJira',
+        'Get-OSMPlaceholdersConfluence',
+        'Convert-JIRAFilterToConfluencePage'
+
+
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.

@@ -137,66 +137,6 @@ function Get-ConfluenceChildPages {
     $REST_RESULTS
 }
 
-# Function to extract all of the UNIQUE Placeholders from a Confluence page storage format, the placeholders are in the format of &lt;&lt;Tsfdalsdkfj&gt;&gt; - read the confluence storage data from file and return an array of unique placeholders
-function Get-OSMPlaceholders {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$PATH_TO_STORAGE_EXPORTS,
-        [Parameter(Mandatory = $false)]
-        [array]$PATTERNS_TO_FIND
-    )
-    if (-not $PATTERNS_TO_FIND) {
-        $PATTERNS_TO_FIND = @('&lt;&lt;.*?&gt;&gt;', 'zoak-osm.([^\s,]+)', '([^\s,]+)to(.*)be(.*)replaced([^\s,]+)')
-        Write-Debug "No pattern provided, using default: $PATTERNS_TO_FIND"
-    }
-    Write-Debug "Checking path $PATH_TO_STORAGE_EXPORTS for files..."
-    # Check if the directory exists and contains files
-    if (-not (Test-Path $PATH_TO_STORAGE_EXPORTS)) {
-        Write-Debug "Directory does not exist or is empty: $PATH_TO_STORAGE_EXPORTS"
-        return
-    }
-    # For each file in the directory, get the content and extract the placeholders
-    Write-Debug "Getting placeholders from files in: $($(Get-ChildItem -Recurse -Path $PATH_TO_STORAGE_EXPORTS -Filter *.xml ).FullName)"
-    $PLACEHOLDERS = @()
-    $CLEAN_FILES = @()
-    Get-ChildItem -Path $PATH_TO_STORAGE_EXPORTS -Recurse -Filter *.xml | ForEach-Object {
-        $FILE = $_
-        $content = Get-Content $FILE.FullName
-        $PATTERNS_TO_FIND | ForEach-Object {
-            $placeholder = $content | Select-String -Pattern $_ -AllMatches | ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
-            if ($_ -eq '&lt;&lt;.*?&gt;&gt;') {
-                if ($placeholder) {
-                    $placeholder_ref = $placeholder | ForEach-Object { $_ -replace '&lt;&lt;', 'PLACEHOLDER_' -replace '&gt;&gt;', ' ' }
-                    $placeholder = "$placeholder_ref ($placeholder)"
-                }
-            }
-            Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
-            if ($placeholder) {
-                $placeholder | ForEach-Object { 
-                    # Write output in red
-                    Write-Host "#### PLACEHOLDER FOUND!!! See: $($FILE.FullName): $_" -ForegroundColor Red
-                    $PLACEHOLDERS += , ($($FILE.NAME), $_) }
-            }
-            else {
-                Write-Debug "No placeholders found in file: $($FILE.FullName)"
-                $CLEAN_FILES += $FILE
-            }
-            Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
-        }
-    }
-    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
-    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
-    Write-Debug 'CLEAN FILES:'
-    $CLEAN_FILES | ForEach-Object { Write-Debug $_.FullName }
-    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
-    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
-    Write-Debug 'FULL LIST:'
-    $PLACEHOLDERS | ForEach-Object { Write-Debug "$($_[0]): $($_[1])" }
-    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
-    Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
-}
-
-
 # Function to convert a JSON file of JIRA issues to a Confluence page table in storage format
 function Convert-JiraIssuesToConfluencePageTable {
     param (
@@ -294,7 +234,13 @@ function Set-ConfluencePage {
         Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
     else {
-        Write-Debug 'Page exists. Updating page...'
+        Write-Debug 'Page exists. Backing up before updating page...'
+        try {
+            Export-ConfluencePageStorageFormat -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_ID $CURRENT_PAGE.results[0].id
+        }
+        catch {
+            Write-Debug "Error exporting page storage format: $($_.Exception.Message)"
+        }
         $PAGE_ID = $CURRENT_PAGE.results[0].id
         Write-Debug "Page ID: $PAGE_ID"
         $PAGE_PAYLOAD = @{
