@@ -22,6 +22,7 @@
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 $script:AtlassianPowerKitRequiredModules = @('PowerShellGet', 'Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
+$script:LOCAL_MODULES = $(Get-ChildItem -Path . -Recurse -Depth 1 -Include *.psd1 -Exclude 'AtlassianPowerKit.psd1', 'AtlassianPowerKit-Shared.psd1', 'Naive-ConflunceStorageValidator.psd1')
 
 function Get-RequisitePowerKitModules {
     $script:AtlassianPowerKitRequiredModules | ForEach-Object {
@@ -40,17 +41,34 @@ function Get-RequisitePowerKitModules {
             Import-Module -Name $_ -Force
         }
     }
+    # Find list of module in subdirectories and import them
+    Import-Module .\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1 -Force
+    Get-Module -Name AtlassianPowerKit*
+    $script:LOCAL_MODULES | ForEach-Object {
+        Write-Debug "Importing nested module: .\$($_.BaseName)\$($_.Name)"
+        Import-Module $_.FullName -Force
+        # Validate the module is imported
+        if (-not (Get-Module -Name $_.BaseName)) {
+            Write-Error "Module $($_.BaseName) not found. Exiting."
+            throw "Nested module $($_.BaseName) not found. Exiting."
+        }
+    }
 }
 # Function display console interface to run any function in the module
 function Show-AtlassianPowerKitFunctions {
     # List nested modules and their exported functions to the console in a readable format, grouped by module
     $colors = @('Green', 'Cyan', 'Red', 'Magenta', 'Yellow')
-    $nestedModules = Get-Module -Name AtlassianPowerKit | Select-Object -ExpandProperty NestedModules | Where-Object Name -Match 'AtlassianPowerKit-.*'
+    $localModules = $script:LOCAL_MODULES | ForEach-Object {
+        Write-Debug "Local module: $($_.Name -replace '.psd1', '')"
+        $module = Get-Module -Name $($_.Name -replace '.psd1', '')
+        $module
+    }
+    Write-Debug "Nested modules: $localModules"
 
     $colorIndex = 0
     $functionReferences = @{}
     $functionReferences[0] = 'Return'
-    $nestedModules | ForEach-Object {
+    $localModules | ForEach-Object {
         # Select a color from the list
         $color = $colors[$colorIndex % $colors.Count]
         $spaces = ' ' * (51 - $_.Name.Length)
@@ -101,7 +119,7 @@ function Show-AtlassianPowerKitFunctions {
         return $null
     } 
     else {
-    # Run the selected function timing the execution
+        # Run the selected function timing the execution
         Write-Host "`n"
         Write-Host "You selected:  $($functionReferences.$selectedFunction)" -ForegroundColor Green
         try {     

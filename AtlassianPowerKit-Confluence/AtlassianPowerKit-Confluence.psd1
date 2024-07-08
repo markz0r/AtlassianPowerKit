@@ -66,15 +66,15 @@
     # FormatsToProcess = @()
 
     # Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
-    NestedModules     = @('..\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1')
+    # NestedModules     = @('..\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1', '.\Naive-ConfluenceStorageValidator\Naive-ConfluenceStorageValidator.psd1')
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
     FunctionsToExport = @(
-        'Set-LoadedProfileConfluence',
         'Get-ConfluencePageByTitle',
         'Convert-JiraIssuesToConfluencePageTable',
         'Export-ConfluencePageStorageFormatForChildren',
-        'Get-OSMPlaceholders'
+        'Export-ConfluencePageStorageFormat',
+        'Set-ConfluencePageContent'
     )
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.
     CmdletsToExport   = @()

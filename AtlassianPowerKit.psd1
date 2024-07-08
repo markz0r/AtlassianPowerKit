@@ -51,19 +51,19 @@
     # ProcessorArchitecture = ''
     
     # Modules that must be imported into the global environment prior to importing this module
+    # Imported in the psm1 file to handle dynamic loading
     RequiredModules   = @(
-        '.\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1',
-        '.\AtlassianPowerKit-Confluence\AtlassianPowerKit-Confluence.psd1',
-        '.\AtlassianPowerKit-UsersAndGroups\AtlassianPowerKit-UsersAndGroups.psd1',
-        '.\AtlassianPowerKit-Jira\AtlassianPowerKit-Jira.psd1'
+        '.\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1'
     )
+    #     '.\AtlassianPowerKit-Confluence\AtlassianPowerKit-Confluence.psd1',
+    #     '.\AtlassianPowerKit-UsersAndGroups\AtlassianPowerKit-UsersAndGroups.psd1',
+    #     '.\AtlassianPowerKit-Jira\AtlassianPowerKit-Jira.psd1'
+    # )
         
     # Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
+    # Imported in the psm1 file to handle dynamic loading .... #
     NestedModules     = @(
-        '.\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1',
-        '.\AtlassianPowerKit-Confluence\AtlassianPowerKit-Confluence.psd1',
-        '.\AtlassianPowerKit-UsersAndGroups\AtlassianPowerKit-UsersAndGroups.psd1',
-        '.\AtlassianPowerKit-Jira\AtlassianPowerKit-Jira.psd1'
+        '.\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1'
     )
     # Assemblies that must be loaded prior to importing this module
     # RequiredAssemblies = @()

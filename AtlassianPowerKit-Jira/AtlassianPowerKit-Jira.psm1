@@ -259,10 +259,11 @@ function Get-JIRAFieldMap {
         }
         else {
             Write-Debug "Adding field to JIRA_FIELD_MAPS: $($_.id) - $($_.name)"
-            $JIRA_FIELD_MAPS[$_.id] = $_.name
+            $JIRA_FIELD_MAPS[$_.name] = $_.id
         }
     }
-    return $JIRA_FIELD_MAPS
+    $JIRA_FIELD_MAP_JSON = $JIRA_FIELD_MAPS | ConvertTo-Json -Depth 10
+    return $JIRA_FIELD_MAP_JSON
 }
 
 # Function to Export all Get-JiraCloudJQLQueryResult to a JSON file
@@ -299,7 +300,9 @@ function Export-JiraCloudJQLQueryResultsToJSON {
 function Get-JiraIssueLinks {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$IssueKey
+        [string]$IssueKey,
+        [Parameter(Mandatory = $false)]
+        [switch]$NoExport
     )
     try {
         $ISSUE_LINKS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/issue/$($IssueKey)?fields=issuelinks" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
@@ -309,19 +312,21 @@ function Get-JiraIssueLinks {
         Write-Error "Error updating field: $($_.Exception.Message)"
     }
     $ISSUE_PREFIX = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)"
-    $ISSUE_LINKS.fields.issuelinks | ForEach-Object {
-        # if the outwardIssue key is present, write the outwardIssue key and the type.outward to the terminal
-        # Write-Debug $_
+    $ISSUE_LINKS_JSON_ARRAY = $ISSUE_LINKS.fields.issuelinks
+    # $ISSUE_LINKS.fields.issuelinks | ForEach-Object {
+    #     # if the outwardIssue key is present, write the outwardIssue key and the type.outward to the terminal
+    #     # Write-Debug $_
 
-        if ($_.outwardIssue.Length -gt 0) {
-            Write-Debug "$ISSUE_PREFIX/$($_.outwardIssue.key), $($_.type.inward), $IssueKey"
-        }
-        else {
-            Write-Debug "$ISSUE_PREFIX/$($_.inwardIssue.key), $($_.type.outward), $IssueKey"
-        }
-        # Write the issue links to a file named ./$($env:AtlassianPowerKit_PROFILE_NAME)/$($env:AtlassianPowerKit_PROFILE_NAME)-$IssueKey-IssueLinks-YYYYMMDD_HHMMSS.json
-        $ISSUE_LINKS | ConvertTo-Json -Depth 30 | Out-File -FilePath "$($env:AtlassianPowerKit_PROFILE_NAME)\$($env:AtlassianPowerKit_PROFILE_NAME)-$IssueKey-IssueLinks-$((Get-Date).ToString('yyyyMMdd_HHmmss')).json"
-    }
+    #     # if ($_.outwardIssue.Length -gt 0) {
+    #     #     Write-Debug "$ISSUE_PREFIX/$($_.outwardIssue.key), $($_.type.inward), $IssueKey"
+    #     # }
+    #     # else {
+    #     #     Write-Debug "$ISSUE_PREFIX/$($_.inwardIssue.key), $($_.type.outward), $IssueKey"
+    #     # }
+    #     # Write the issue links to a file named ./$($env:AtlassianPowerKit_PROFILE_NAME)/$($env:AtlassianPowerKit_PROFILE_NAME)-$IssueKey-IssueLinks-YYYYMMDD_HHMMSS.json
+    #     # $ISSUE_LINKS | ConvertTo-Json -Depth 30 | Out-File -FilePath "$($env:AtlassianPowerKit_PROFILE_NAME)\$($env:AtlassianPowerKit_PROFILE_NAME)-$IssueKey-IssueLinks-$((Get-Date).ToString('yyyyMMdd_HHmmss')).json"
+    # }
+    return $ISSUE_LINKS_JSON_ARRAY
 }
 
 # Function to export all issue links from issues in a JQL query to a JSON file
@@ -514,6 +519,92 @@ function Get-JiraIssueChangeLog {
     #Write-Debug $($CHANGE_LOG | ConvertTo-Json -Depth 10)
     return $CHANGE_LOG
 
+}
+# TODO - Make this function generic with JSON_MAP parameter
+function Set-SSGRequirementFields {
+    param (
+        [Parameter(Mandatory = $false)]
+        [string]$JQL_STRING = 'project = GRCOSM and IssueType = Requirement and statuscategory != done'
+    )
+    $FIELD_ID_NAME_MAP_JSON = Get-JIRAFieldMap
+    $FIELD_ID_NAME_MAP = ConvertFrom-Json -InputObject $FIELD_ID_NAME_MAP_JSON -AsHashtable
+    $FIELD_LINKTYPE_JSON_MAP = '{
+        "Applicability Justification": "is caused by",
+        "Security Requirements": "addressed by",
+        "Dependencies": "met by"
+    }'
+    $PAYLOAD_HASHTABLE = @{}
+    # Create a hash table of the field name and field ID for the field names in the JSON object
+    $FIELD_LINKTYPE_MAP = ConvertFrom-Json -InputObject $FIELD_LINKTYPE_JSON_MAP -AsHashtable
+    # For each issue in the JQL query, get the issue JSON, get the issue links of HASHMAP type and set the field value to a bullet list of linked issues
+    $ISSUES = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING
+    $ISSUES.issues | ForEach-Object {
+        $THIS_LINKED_ISSUES = @()
+        $ISSUE = $_
+        $ISSUE_KEY = $ISSUE.key
+        $ISSUE_LINKS_JSON_ARRAY = Get-JiraIssueLinks -IssueKey $ISSUE_KEY
+        #Write-Debug "ISSUE_LINKS_JSON_ARRAY: $($ISSUE_LINKS_JSON_ARRAY.GetType())"
+        #Write-Debug "ISSUE_LINKS_JSON_ARRAY: $($ISSUE_LINKS_JSON_ARRAY.Count)"
+        # ISSUE_LINKS_JSON_ARRAY is System.Object[], so we need to convert it to a JSON object then print it
+        #Write-Debug $($ISSUE_LINKS_JSON_ARRAY | ConvertTo-Json -Depth 10)
+        # For each $FIELD_LINKTYPE_MAP
+        if ($ISSUE_LINKS_JSON_ARRAY.Count -eq 0) {
+            Write-Debug "No linked issues found for $ISSUE_KEY"
+            return
+        }
+        else {
+            Write-Debug "Linked issues found for $ISSUE_KEY"
+            $FIELD_LINKTYPE_MAP.GetEnumerator() | ForEach-Object {
+                $FIELD_NAME = $_.Key
+                $INWARD_LINK_TYPE = $_.Value
+                $THIS_LINKED_ISSUES = $ISSUE_LINKS_JSON_ARRAY | Where-Object { $_.type.inward -eq $INWARD_LINK_TYPE }
+                if ($THIS_LINKED_ISSUES.Count -eq 0) {
+                    Write-Debug "No linked issues found for $FIELD_NAME"
+                    return
+                }
+                else {
+                    Write-Debug "Linked issues found for $FIELD_NAME"
+
+                    # Create a bullet list of linked issues with "* https://$($Env:AtlassianPowerKit_AtlassianAPIEndpoint)/browse/$($_.inwardIssue.key)"
+                    $LINKED_ISSUES_LIST = $THIS_LINKED_ISSUES | ForEach-Object { 
+                        "* [$($_.inwardIssue.fields.summary)|https://$($Env:AtlassianPowerKit_AtlassianAPIEndpoint)/browse/$($_.inwardIssue.key)] `n ** $($_.inwardIssue.key)" 
+                    }
+                    Write-Debug "FIELD_ID_NAME_MAP type = $($FIELD_ID_NAME_MAP.GetType())"
+                    Write-Debug "FIELD_ID_NAME_MAP Count: $($FIELD_ID_NAME_MAP.Count)"
+                    Write-Debug "FIELD_ID_NAME_MAP: $($FIELD_ID_NAME_MAP)"           
+                    $FIELD_ID = $FIELD_ID_NAME_MAP[$FIELD_NAME]
+                    $PAYLOAD_HASHTABLE[$FIELD_ID] = $LINKED_ISSUES_LIST
+                }
+            }
+            #Write-Debug "Setting fields for issue: $ISSUE_KEY"
+            #Write-Debug "Payload: $($PAYLOAD_HASHTABLE | ConvertTo-Json -Depth 10)"
+            # OUTPUTS:
+            # Payload: {
+            #   "Applicability Justification": [
+            #     "[https://securityshift.atlassian.net/browse/GRCOSM-323|https://securityshift.atlassian.net/browse/GRCOSM-323|smart-link]",
+            #     "[https://securityshift.atlassian.net/browse/GRCOSM-325|https://securityshift.atlassian.net/browse/GRCOSM-325|smart-link]"
+            #   ],
+            #   "Dependencies": [
+            #     "[https://securityshift.atlassian.net/browse/GRCOSM-547|https://securityshift.atlassian.net/browse/GRCOSM-547|smart-link]",
+            #     "[https://securityshift.atlassian.net/browse/GRCOSM-614|https://securityshift.atlassian.net/browse/GRCOSM-614|smart-link]"
+            #   ],
+            #   "Security Requirements": [
+            #     "[https://securityshift.atlassian.net/browse/GRCOSM-429|https://securityshift.atlassian.net/browse/GRCOSM-429|smart-link]",
+            #     "[https://securityshift.atlassian.net/browse/GRCOSM-434|https://securityshift.atlassian.net/browse/GRCOSM-434|smart-link]"
+            #   ]
+            # Now set the rich text fields with the bullet list of linked issues
+            if ($PAYLOAD_HASHTABLE.Count -gt 0) {
+                $PAYLOAD_HASHTABLE.GetEnumerator() | ForEach-Object {
+                    if ($_.Value) {
+                        $FIELD_NAME = $_.Key
+                        $FIELD_VALUE = $_.Value -join "`n"
+                        Write-Debug "Setting field: -ISSUE_KEY $ISSUE_KEY -Field_Ref $FIELD_NAME -New_Value $FIELD_VALUE -FieldType 'text'"
+                        Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref $FIELD_NAME -New_Value $FIELD_VALUE -FieldType 'text'
+                    }
+                }
+            }
+        }
+    }
 }
 
 # Function to edit a Jira issue field given the issue key, field name, and new value
