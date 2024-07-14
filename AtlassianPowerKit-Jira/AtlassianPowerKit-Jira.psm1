@@ -524,7 +524,7 @@ function Get-JiraIssueChangeLog {
 function Set-SSGRequirementFields {
     param (
         [Parameter(Mandatory = $false)]
-        [string]$JQL_STRING = 'project = GRCOSM and IssueType = Requirement and statuscategory != done'
+        [string]$JQL_STRING = 'project = GRCOSM AND issuetype = Requirement AND "Applicability[Dropdown]" = Applicable and key > "GRCOSM-66"'
     )
     $FIELD_ID_NAME_MAP_JSON = Get-JIRAFieldMap
     $FIELD_ID_NAME_MAP = ConvertFrom-Json -InputObject $FIELD_ID_NAME_MAP_JSON -AsHashtable

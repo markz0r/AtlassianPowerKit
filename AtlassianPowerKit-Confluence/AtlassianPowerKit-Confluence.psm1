@@ -24,6 +24,129 @@ function Get-ConfluenceSpaces {
     Write-Debug "Confluence Space Maps set: $($script:CONFLUENCE_SPACE_MAP | Format-List * | Out-String)"
 }
 
+function Export-ConfluencePageWord {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$CONFLUENCE_SPACE_KEY,
+        [Parameter(Mandatory = $true)]
+        [int64]$CONFLUENCE_PAGE_ID,
+        [Parameter(Mandatory = $true)]
+        [string]$CONFLUENCE_PAGE_TITLE,
+        [Parameter(Mandatory = $false)]
+        [string]$TEMPLATE_FILEPATH = ".\$($env:AtlassianPowerKit_PROFILE_NAME)\$($env:AtlassianPowerKit_PROFILE_NAME)_Document_Template.dotx"
+    )
+    $CONFLUENCE_PAGE_TITLE = $CONFLUENCE_PAGE_TITLE -replace ' ', ''
+    $CONFLUENCE_PAGE_TITLE = $CONFLUENCE_PAGE_TITLE -replace '[\\\/\:\*\?\"\<\>\|]', ''
+    $CONFLUENCE_PAGE_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/wiki/exportword?pageId=$($CONFLUENCE_PAGE_ID)"
+    $directoryString = ".\$($env:AtlassianPowerKit_PROFILE_NAME)\$CONFLUENCE_SPACE_KEY\CONFLUENCE_WORD_EXPORTS"
+    if (-not (Test-Path $directoryString)) {
+        New-Item -ItemType Directory -Path $directoryString -Force
+    }
+    $directoryPath = Get-Item -Path $directoryString
+    if (-not (Test-Path $TEMPLATE_FILEPATH)) {
+        Write-Error "Template file does not exist: $TEMPLATE_FILEPATH"
+    }
+    $TEMPLATE_FILE_NAME = $(Get-Item -Path $TEMPLATE_FILEPATH).FullName
+    
+    try {
+        $response = Invoke-WebRequest -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+        # Save the content directly to the file
+        [System.IO.File]::WriteAllBytes($FILE_NAME, $response.Content)
+    }
+    catch {
+        Write-Error "Exception.Message: $($_.Exception.Message)"
+    }
+    $FILE_STRING = "$($directoryPath.FullName)\$CONFLUENCE_PAGE_TITLE.doc"
+    $FILE_NAME = $(get-item -Path $FILE_STRING).FullName
+    Write-Debug "Confluence page exported to: $FILE_NAME"
+    Write-Debug "Applying template: $TEMPLATE_FILE to $FILE_NAME..."
+    try {
+        $wordApp = New-Object -ComObject Word.Application
+        #$wordApp.Visible = $false
+        $wordApp2 = New-Object -ComObject word.application
+        #$wordApp2.visible = $false
+        Write-Debug '   - Converting to docx...'
+        $doc = $wordApp.Documents.Open($FILE_NAME)
+        # Save as docx
+        $newDoc = $doc.Convert()
+        $newDoc.SaveAs2("$($FILE_NAME)x", 16)
+        $doc.Close()
+        $newDoc.Close()
+        Write-Debug '   - Prepping template...'
+        # Add-Type -AssemblyName office
+        # [ref]$SaveFormat = 'microsoft.office.interop.word.WdSaveFormat' -as [type]
+        $sourceDoc = $wordApp.Documents.Open("$($FILE_NAME)x")
+        # Check if the template file exists
+        ################# Clean up and get Copy of the source document
+        # Select from the beginning of the document to the end the second heading level 1
+        $what = 11 # wdGoToHeading https://learn.microsoft.com/en-us/office/vba/api/word.wdgotoitem
+        $which = 1 # wdGoToAbsolute https://learn.microsoft.com/en-us/office/vba/api/word.wdgotoitem
+        $count = 2
+        #$wordApp.Activate()
+        $rangeEnd = $sourceDoc.GoTo($what, $which, $count)
+        $selection = $wordApp.Selection
+        $selection.SetRange(0, $rangeEnd.Start)
+        $selection.Delete()
+        # Select remaining text and copy it
+        $range = $sourceDoc.Range()
+        $copy = $range.Copy()
+        #################
+        ################# Paste the copied text into the new document based on the template
+        $templateDoc = $wordApp2.Documents.Add($TEMPLATE_FILE_NAME)
+        #$wordApp2.Activate()
+        $what = 1 # wdGoToPage https://learn.microsoft.com/en-us/office/vba/api/word.wdgotoitem
+        $which = 1 # wdGoToAbsolute https://learn.microsoft.com/en-us/office/vba/api/word.wdgotoitem
+        $count = 4
+        $selection = $templateDoc.GoTo($what, $which, $count)
+        $selection.Paste()
+        #################
+        ################# Clean up the templated document
+        $STRINGS_TO_REMOVE = @('﻿﻿')
+        $STRINGS_TO_REMOVE | ForEach-Object {
+            $templateDoc.Content.Find.Execute($_, $false, $false, $false, $false, $false, $true, 1, $true, '', 2)
+        }  
+        
+        #################
+        ################# Save the new document
+        $templateDoc.SaveAs("$directoryPath\$CONFLUENCE_PAGE_TITLE-Templated.docx")
+        # Also print as PDF
+        $templateDoc.SaveAs("$directoryPath\$CONFLUENCE_PAGE_TITLE-Templated.pdf", 17)
+        $sourceDoc.Close()
+        $templateDoc.Close()
+    }
+    catch {
+        Write-Debug 'AtlassianPowerKit-Confluence.psm1:Export-ConfluencePageWord - Errored!'
+        Write-Error "Exception.Message: $($_.Exception.Message)"
+    }
+    finally {
+        $wordApp.Quit()
+        $wordApp2.Quit()
+    }
+}
+
+# Function to export Confluence Child Pages to word documents
+function Export-ConfluencePageChildrenWord {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$CONFLUENCE_SPACE_KEY,
+        [Parameter(Mandatory = $true)]
+        [string]$CONFLUENCE_PARENT_PAGE_TITLE
+    )
+    $PARENT_PAGE = Get-ConfluencePageByTitle -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_TITLE $CONFLUENCE_PARENT_PAGE_TITLE
+    if (!$PARENT_PAGE) {
+        throw "Parent page does not exist: $CONFLUENCE_PARENT_PAGE_TITLE"
+    }
+    $PARENT_PAGE_ID = $PARENT_PAGE.results[0].id
+    Write-Debug "Parent Page ID: $PARENT_PAGE_ID, Title: $CONFLUENCE_PARENT_PAGE_TITLE - getting child pages..."
+    $CHILD_PAGES = $(Get-ConfluenceChildPages -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -PARENT_ID $PARENT_PAGE_ID)
+    Write-Debug "Found $($CHILD_PAGES.results.count) child pages..."
+    $CHILD_PAGES.results | ForEach-Object {
+        $CONFLUENCE_PAGE_TITLE = $_.title
+        $CONFLUENCE_PAGE_ID = $_.id
+        Export-ConfluencePageStorageFormat -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_ID $CONFLUENCE_PAGE_ID
+    }
+}
+
 # Function get page by title
 function Get-ConfluencePageByTitle {
     param (
@@ -41,7 +164,7 @@ function Get-ConfluencePageByTitle {
     try {
         $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
         #Write-Debug $REST_RESULTS.getType()
-        #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+        Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     }
     catch {
         Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
