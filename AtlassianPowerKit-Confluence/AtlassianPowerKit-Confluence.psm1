@@ -47,7 +47,7 @@ function Export-ConfluencePageWord {
         Write-Error "Template file does not exist: $TEMPLATE_FILEPATH"
     }
     $TEMPLATE_FILE_NAME = $(Get-Item -Path $TEMPLATE_FILEPATH).FullName
-    
+    $FILE_NAME = "$($directoryPath.FullName)\$CONFLUENCE_PAGE_TITLE.doc"    
     try {
         $response = Invoke-WebRequest -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
         # Save the content directly to the file
@@ -215,7 +215,7 @@ function Set-ConfluencePageContent {
         [string]$CONFLUENCE_SPACE_KEY,
         [Parameter(Mandatory = $true)]
         [int64]$CONFLUENCE_PAGE_ID,
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $true)]
         [string]$CONFLUENCE_PAGE_STORAGE_FILE
     )
     Get-ChildItem -Path . -Recurse -Filter 'Naive-ConflunceStorageValidator.psd1' | Import-Module
@@ -256,10 +256,15 @@ function Set-ConfluencePageContent {
             Write-Error "Exiting as no file found in $FILE_PATH with name like $CONFLUENCE_PAGE_TITLE_ENCODED*.xml"
         }
     }
+    $CONFLUENCE_PAGE_TITLE = $REST_RESULTS.title
     Write-Debug 'Validating content is somewhat valid...'
     Test-ConfluenceStorageFormat -FilePath $CONFLUENCE_PAGE_STORAGE_FILE
     Write-Debug "Making backup of current page ID: $CONFLUENCE_PAGE_ID in space: $CONFLUENCE_SPACE_KEY..."
-    Export-ConfluencePageStorageFormat -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_ID $CONFLUENCE_PAGE_ID
+    #Export-ConfluencePageStorageFormat -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_ID $CONFLUENCE_PAGE_ID
+    # Remove pretty formatting, whitepassed, and newlines
+    $CONFLUENCE_PAGE_STORAGE = $CONFLUENCE_PAGE_STORAGE -replace '\s+', ' '
+
+    
 
     $PAGE_PAYLOAD = @{
         id      = $CONFLUENCE_PAGE_ID
@@ -338,7 +343,7 @@ function Get-ConfluenceChildPages {
 }
 
 # Function to convert a JSON file of JIRA issues to a Confluence page table in storage format
-function Convert-JiraIssuesToConfluencePageTable {
+function Convert-JiraFilterToConfluencePageTable {
     param (
         [Parameter(Mandatory = $true)]
         [string]$CONFLUENCE_PAGE_TITLE,

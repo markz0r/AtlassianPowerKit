@@ -67,7 +67,6 @@ function Unlock-Vault {
     }
     # If no error is thrown, the vault is unlocked.
     Write-Debug 'Vault is unlocked.'
-    return $true
 }
 
 # Function to test if AtlassianPowerKit profile authenticates successfully
@@ -203,7 +202,6 @@ function Set-AtlassianPowerKitProfile {
                 Invoke-Expression -Command $SetEnvar
                 Write-Debug "Environment variable set: $SetEnvar"
             }
-            
         } 
         catch {
             Write-Debug "Failed to load profile $ProfileName. Please check the vault key file."
@@ -211,6 +209,7 @@ function Set-AtlassianPowerKitProfile {
         }
         Set-AtlassianAPIHeaders
         Set-OpsgenieAPIHeaders
+        $env:AtlassianPowerKit_CloudID = $(Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/_edge/tenant_info").cloudId
         Write-Debug "Profile $ProfileName loaded successfully."
     }
     return $true
@@ -333,6 +332,38 @@ function Reset-AtlassianPowerKitProfile {
         Write-Debug "Removing environment variable: $_"
         Remove-Item -Path $_.Name -ErrorAction SilentlyContinue
     }
+}
+
+# Function to iterate through profile directories and clear contents by 
+function Clear-AtlassianPowerKitProfileDirs {
+    $PROFILE_DIRS = Get-AtlassianPowerKitProfileList | Get-Item
+    $EXCLUDED_BACKUP_PATTERNS = @('*.zip')
+    $EXCLUDED_DELETE_PATTERNS = @('*.zip', '*.md', '*.dotx', '*pdf', '*.doc', '*.docx', '*template', '*ARCHIVE')
+    # Get all subdirectories in the AtlassianPowerKit profile directory that dont match $EXCLUDED_FILENAME_PATTERNS
+    foreach ($dir in $PROFILE_DIRS) {
+        $ARCHIVE_NAME = "$($dir.BaseName)_ARCHIVE_$(Get-Date -Format 'yyyyMMdd').zip"
+        $ARCHIVE_PATH = Join-Path -Path $dir.FullName -ChildPath $ARCHIVE_NAME
+
+        # Collecting items excluding the patterns
+        $itemsToArchive = Get-ChildItem -Path $dir.FullName -Recurse -File -Exclude $EXCLUDED_BACKUP_PATTERNS
+        Write-Debug "Items to archive: $($itemsToArchive.FullName) ..."
+
+        if ($itemsToArchive.Count -eq 0) {
+            Write-Debug "Profile directory $dir. FullName has nothing to archive. Skipping..."
+        }
+        else {
+            # Archiving items
+            Compress-Archive -Path $itemsToArchive.FullName -DestinationPath $ARCHIVE_PATH -Force
+            Write-Debug "Archiving $($dir.BaseName) to $ARCHIVE_NAME in $($dir.FullName)...."
+
+            # Optionally, clear the directory after archiving
+            Get-ChildItem -Path $dir.FullName -Recurse -File -Exclude $EXCLUDED_DELETE_PATTERNS | Remove-Item -Force
+            # Delete any directories with no files or subdirectories
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory | Where-Object { $_.GetFiles().Count -eq 0 -and $_.GetDirectories().Count -eq 0 } | Remove-Item -Force
+            # Write-Debug "Profile directory $dir.FullName cleared and archived to $ARCHIVE_NAME."
+        }
+    }
+    Write-Debug 'Profile directories cleared.'
 }
 
 function Clear-AtlassianPowerKitVault {

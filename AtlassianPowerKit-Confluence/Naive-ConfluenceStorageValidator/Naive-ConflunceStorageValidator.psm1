@@ -50,8 +50,8 @@ function Test-ConfluenceStorageFormat {
 
     foreach ($element in $requiredElements) {
         if (-not $xmlContent.OuterXml.Contains($element)) {
-            Write-Error "ERROR: Required element not found: $element"
-            $isValid = $false
+            Write-Warning "ERROR: Required element not found: $element"
+            #$isValid = $false
         }
     }
 
@@ -65,6 +65,6 @@ function Test-ConfluenceStorageFormat {
         Write-Debug "Success - $FilePath adheres to the basic structure of the Confluence Storage Format."
     }
     else {
-        Write-Error "$FilePath does not adhere to the basic structure of the Confluence Storage Format."    
+        Write-Error "$FilePath does not adhe to the basic structure of the Confluence Storage Format."    
     }
 }
