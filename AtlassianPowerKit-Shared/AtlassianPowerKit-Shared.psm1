@@ -338,7 +338,7 @@ function Reset-AtlassianPowerKitProfile {
 function Clear-AtlassianPowerKitProfileDirs {
     $PROFILE_DIRS = Get-AtlassianPowerKitProfileList | Get-Item
     $EXCLUDED_BACKUP_PATTERNS = @('*.zip')
-    $EXCLUDED_DELETE_PATTERNS = @('*.zip', '*.md', '*.dotx', '*pdf', '*.doc', '*.docx', '*template', '*ARCHIVE')
+    $EXCLUDED_DELETE_PATTERNS = @('*.zip', '*.md', '*.dotx', '*pdf', '*.doc', '*.docx', '*templates', '*ARCHIVE')
     # Get all subdirectories in the AtlassianPowerKit profile directory that dont match $EXCLUDED_FILENAME_PATTERNS
     foreach ($dir in $PROFILE_DIRS) {
         $ARCHIVE_NAME = "$($dir.BaseName)_ARCHIVE_$(Get-Date -Format 'yyyyMMdd').zip"
@@ -355,14 +355,14 @@ function Clear-AtlassianPowerKitProfileDirs {
             # Archiving items
             Compress-Archive -Path $itemsToArchive.FullName -DestinationPath $ARCHIVE_PATH -Force
             Write-Debug "Archiving $($dir.BaseName) to $ARCHIVE_NAME in $($dir.FullName)...."
-
-            # Optionally, clear the directory after archiving
-            Get-ChildItem -Path $dir.FullName -Recurse -File -Exclude $EXCLUDED_DELETE_PATTERNS | Remove-Item -Force
             # Delete any directories with no files or subdirectories
-            Get-ChildItem -Path $dir.FullName -Recurse -Directory | Where-Object { $_.GetFiles().Count -eq 0 -and $_.GetDirectories().Count -eq 0 } | Remove-Item -Force
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory | Where-Object { $_.GetFileSystemInfos().Count -eq 0 } | Remove-Item -Force
             # Write-Debug "Profile directory $dir.FullName cleared and archived to $ARCHIVE_NAME."
         }
+        Get-ChildItem -Path $dir.FullName -Recurse -File -Exclude $EXCLUDED_DELETE_PATTERNS | Remove-Item -Force
+        Get-ChildItem -Path $dir.FullName -Recurse -Directory -Exclude $EXCLUDED_DELETE_PATTERNS | Remove-Item -Force
     }
+    # Optionally, clear the directory after archiving
     Write-Debug 'Profile directories cleared.'
 }
 
