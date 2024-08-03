@@ -57,12 +57,11 @@ function Get-AtlassianGroupMembersBulk {
     }
     # Write $MEMBERS_LIST to a file as CSV with groupname as Row header and members below
     $EXPORT_DATE = Get-Date -Format 'yyyy-MM-dd-HHmmss'
-    $EXPORT_FILE = "AtlassianGroupMembers-$($env:AtlassianPowerKit_PROFILE_NAME)-$EXPORT_DATE.csv"
+    $EXPORT_FILE = "$($env:AtlassianPowerKit_PROFILE_NAME)\AtlassianGroupMembers-$($env:AtlassianPowerKit_PROFILE_NAME)-$EXPORT_DATE.csv"
     $MEMBERS_LIST.GetEnumerator() | ForEach-Object {
         $GROUP_NAME = $_.Key
         $GROUP_MEMBERS = $_.Value
         # Create a CSV file with the group name as the header and the members below, with each member on a new line
-        $CSV_COLUMNS = 'Group Name', 'Member Name', 'Member Account ID', 'Member Email Address'
         $CSV_ARRAY = @()
         $GROUP_MEMBERS | ForEach-Object {
             $CSV_ARRAY += [PSCustomObject]@{
@@ -72,7 +71,8 @@ function Get-AtlassianGroupMembersBulk {
                 'Member Email Address' = $_.emailAddress
             }
         }
-        $CSV_ARRAY | Export-Csv -Path $EXPORT_FILE -NoTypeInformation -Append
+        # Export the CSV_ARRAY to a CSV file with headers
+        $CSV_ARRAY | Export-Csv -Path $EXPORT_FILE -NoTypeInformation -Append 
     }
 }
 
@@ -131,19 +131,59 @@ function Get-AtlassianGroupMembers {
         Write-Host "No members found in group $GROUP_NAME"
     }
     else {
+        Write-Debug "REST_RESULTS TYPE = $($REST_RESULTS.getType())"
+        Write-Debug "REST_RESULTS COUNT = $($REST_RESULTS.Count)"
         # Build an array of hashtables with the values handle null values
         $REST_RESULTS.values | ForEach-Object {
-            $MEMBER_HASH = @{
+            $MEMBERS_HASH_ARRAY += [PSCustomObject] @{
                 'displayName'  = $_.displayName
                 'accountId'    = $_.accountId
                 'emailAddress' = $_.emailAddress
             }
-            $MEMBERS_HASH += $MEMBER_HASH
         }
     }
     Write-Debug $MEMBERS_HASH.getType()
     Write-Debug (ConvertTo-Json $MEMBERS_HASH -Depth 10)
     return $MEMBERS_HASH
+}
+function Get-AllAtlassianUsers {
+    $EXPORT_DATE = Get-Date -Format 'yyyy-MM-dd-HHmmss'
+    $CSV_OUTPUT_FILE = "$($env:AtlassianPowerKit_PROFILE_NAME)\AtlassianUserList-$($env:AtlassianPowerKit_PROFILE_NAME)-$EXPORT_DATE.csv"
+    $USERS_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/users/search?maxResults=1000"
+    $HEADERS = ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders
+    Write-Debug "Users Endpoint: $USERS_ENDPOINT"
+    Write-Debug "Headers: $HEADERS"
+    try {
+        $REST_RESULTS = Invoke-RestMethod -Uri $USERS_ENDPOINT -Headers $HEADERS -Method Get -ContentType 'application/json'
+    }
+    catch {
+        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
+        Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
+    }
+    # Get values.displayName, values.accountId, values.emailAddress from REST_RESULTS
+    # Build an array of hashtables with the values
+    $USERS_HASH_ARRAY = @()
+    # Build an array of hashtables with the values, handle null values and no members
+    if ($REST_RESULTS.total -eq 0) {
+        Write-Host 'No users found'
+    }
+    else {
+        # Build an array of hashtables with the values handle null values
+        $REST_RESULTS | ForEach-Object {
+            $USERS_HASH_ARRAY += [PSCustomObject] @{
+                'displayName'     = $_.displayName
+                'accountId'       = $_.accountId
+                'IsAccountActive' = $_.active
+                'accountType'     = $_.accountType
+                'emailAddress'    = $_.emailAddress
+            }
+        }
+    }
+    #Write-Debug $USERS_HASH.getType()
+    #Write-Debug (ConvertTo-Json $USERS_HASH -Depth 10)
+    # Write $USERS_HASH to a file as CSV
+    $USERS_HASH_ARRAY | Export-Csv -Path $CSV_OUTPUT_FILE -NoTypeInformation
+    Write-Debug "User list exported to: $CSV_OUTPUT_FILE"
 }
 
 # Function get user details and create json object for that user in the Jira Cloud API using the accountID
