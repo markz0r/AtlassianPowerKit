@@ -9,7 +9,7 @@
 @{
 
     # Script module or binary module file associated with this manifest.
-    RootModule        = 'AtlassianPowerKit-UsersAndGroups.psm1'
+    RootModule        = 'AtlassianPowerKit-JSM.psm1'
 
     # Version number of this module.
     ModuleVersion     = '1.0.0'
@@ -18,7 +18,7 @@
     # CompatiblePSEditions = @()
 
     # ID used to uniquely identify this module
-    GUID              = '9a0003c9-b7c6-4a2a-ab0d-9a55e1413e3a'
+    GUID              = 'd09c6493-840b-44c5-b065-6ab56b317031'
 
     # Author of this module
     Author            = 'Mark Culhane'
@@ -30,7 +30,7 @@
     Copyright         = '(c) ZOAK PTY LTD. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description       = 'Atlassian Cloud PowerShell Module - Users and Groups - for handy functions to interact with Attlassian Cloud APIs.'
+    Description       = 'Atlassian Cloud PowerShell Module for handy functions to interact with Attlassian Cloud APIs.'
 
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion = '7.3'
@@ -70,14 +70,8 @@
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
     FunctionsToExport = @(
-        'Remove-AttachmentsFromConfPage',
-        'Set-LoadedProfileUsersAndGroups',
-        'Get-AtlassianGroupMembersBulk',
-        'Get-AtlassianGroupMembers',
-        'Get-AtlassianGroups',
-        'Show-JiraCloudJSMProjectRole',
-        'Get-AtlassianUser',
-        'Get-AllAtlassianUsers'
+        'Get-AtlassianOrgs',
+        'Export-OrgHistory'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.

@@ -342,6 +342,44 @@ function Get-ConfluenceChildPages {
     $REST_RESULTS
 }
 
+# Function to remove all attachments from a Confluence page given the page ID and optionally and exclude list of attachment names
+function Remove-AttachmentsFromConfPage {
+    param (
+        [Parameter(Mandatory = $true)]
+        [int64]$CONFLUENCE_PAGE_ID,
+        [Parameter(Mandatory = $false)]
+        [array]$EXCLUDE_ATTACHMENT_NAMES
+    )
+    $CONFLUENCE_PAGE_ATTACHMENTS_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/wiki/api/v2/pages/$CONFLUENCE_PAGE_ID/attachments"
+    try {
+        $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ATTACHMENTS_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+        Write-Debug $REST_RESULTS.getType()
+        Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+    }
+    catch {
+        Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
+        Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
+    }
+    $REST_RESULTS.results | ForEach-Object {
+        if ($EXCLUDE_ATTACHMENT_NAMES -contains $_.title) {
+            Write-Debug "Excluding attachment: $($_.title)"
+        }
+        else {
+            $CONFLUENCE_PAGE_ATTACHMENT_DELETE_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/wiki/api/v2/attachments/$($_.id)"
+            try {
+                Write-Debug "Deleting attachment: $($_.title)"
+                Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ATTACHMENT_DELETE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Delete
+                Write-Debug $REST_RESULTS.getType()
+                Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+            }
+            catch {
+                Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
+                Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
+            }
+        }
+    }
+}
+
 # Function to convert a JSON file of JIRA issues to a Confluence page table in storage format
 function Convert-JiraFilterToConfluencePageTable {
     param (
