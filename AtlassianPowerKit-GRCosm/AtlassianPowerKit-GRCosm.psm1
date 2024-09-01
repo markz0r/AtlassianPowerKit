@@ -464,3 +464,5 @@ if ($ReAuth) {
     }
     Connect-MgGraphScoped -RequiredScopes $MS_GRAPH_SCOPES -TenantName $TenantName
 }
+
+# Funtion 

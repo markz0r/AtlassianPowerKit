@@ -279,6 +279,30 @@ function Get-JIRAFieldMap {
     $JIRA_FIELD_MAP_JSON = $JIRA_FIELD_MAPS | ConvertTo-Json -Depth 10
     return $JIRA_FIELD_MAP_JSON
 }
+# Function to check if a Jira issue exists by key or ID
+function Test-JiraIssueExists {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$KeyOrID
+    )
+    # Invoke-RestMethod and capture the response to $ISSUE_KEY, even if it is an error
+    try {
+        $ISSUE_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issue/$($KeyOrID)?fields=null" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+    }
+    catch {
+        Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
+        $ISSUE_RESPONSE = ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
+    }
+    Write-Debug "Response: $($ISSUE_RESPONSE | ConvertTo-Json -Depth 10)"
+    if ($ISSUE_RESPONSE.id) {
+        Write-Debug "Jira issue $KeyOrID exists."
+        return $true
+    }
+    else {
+        Write-Debug "Jira issue $KeyOrID does not exist."
+        return $false
+    }
+}
 
 # Function to Export all Get-JiraCloudJQLQueryResult to a JSON file
 function Export-JiraCloudJQLQueryResultsToJSON {
@@ -329,26 +353,6 @@ function Get-JiraIssueLinks {
     return $ISSUE_LINKS_JSON_ARRAY
 }
 
-# Function to export all issue links from issues in a JQL query to a JSON file
-function Export-JiraIssueLinksFromJQL {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$JQL_STRING
-    )
-    # Get the JQL query results and provide the JSON file path if it is defined
-    $JSON_FILE_PATH = "$($env:AtlassianPowerKit_PROFILE_NAME)/$($env:AtlassianPowerKit_PROFILE_NAME)-JQLExportLinks-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
-    if (-not (Test-Path $($env:AtlassianPowerKit_PROFILE_NAME))) {
-        New-Item -ItemType Directory -Path $($env:AtlassianPowerKit_PROFILE_NAME)
-    }
-    Write-Debug 'Exporting JQL query results to JSON'
-    if (-not (Test-Path $JSON_FILE_PATH)) {
-        New-Item -ItemType Directory -Path $JSON_FILE_PATH
-    }
-    $ISSUES = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/search?fields=key" -Headers $args[3] -Method Post -Body $args[0] -ContentType 'application/json'
-
-
-}
-
 function Get-JiraCloudJQLQueryResultPages {
     param (
         [Parameter(Mandatory = $true)]
@@ -393,8 +397,7 @@ function Get-JiraCloudJQLQueryResultPages {
         }
         $ISSUE = $($ISSUES.issues | Select-Object -Property key, fields)
         # Write the issue object to terminal displaying all fields
-
-        $ISSUE_JSON = $ISSUES.issues | Select-Object -Property key, fields | ConvertTo-Json -Depth 30
+        #$ISSUE_JSON = $ISSUES.issues | Select-Object -Property key, fields | ConvertTo-Json -Depth 30
 
     }
     #Out-File -FilePath "$JSON_FILE_PATHNAME"
@@ -623,8 +626,8 @@ function Set-JiraIssueField {
         [string]$Field_Ref,
         [Parameter(Mandatory = $true)]
         [array]$New_Value,
-        [Parameter(Mandatory = $true)]
-        [string]$FieldType
+        [Parameter(Mandatory = $false)]
+        [string]$FieldType = 'text'
     )
     if ($Field_Ref -eq 'customfield_10181') {
         Write-Debug 'Overiding known field ID change for Service Categories to customfield_10316...'
@@ -643,6 +646,7 @@ function Set-JiraIssueField {
         }
     }
     #$FIELD_PAYLOAD = $FIELD_PAYLOAD | ConvertTo-Json -Depth 10
+    Write-Debug "### UPDATING ISSUE: https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/browse/$ISSUE_KEY"
     Write-Debug "Field Type: $FieldType"
     switch -regex ($FieldType) {
         'custom' { $FIELD_PAYLOAD = $(Set-MutliSelectPayload) }
@@ -664,6 +668,37 @@ function Set-JiraIssueField {
         Write-Error "Error updating field: $($_.Exception.Message)"
     }
     Write-Debug "$UPDATE_ISSUE_RESPONSE"
+}
+
+# Function to set-jiraissuefield for a Jira issue field for all issues in JQL query results gibven the JQL query string, field name, and new value
+function Set-JiraIssueFieldForJQLQueryResults {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$JQL_STRING,
+        [Parameter(Mandatory = $true)]
+        [string]$Field_Ref,
+        [Parameter(Mandatory = $true)]
+        [string]$New_Value,
+        [Parameter(Mandatory = $false)]
+        [string]$FieldType = 'text'
+    )
+    $ISSUES = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING
+    $ISSUES.issues | ForEach-Object {
+        $ISSUE = $_
+        $ISSUE_KEY = $ISSUE.key
+        $ISSUE_SUMMARY = $ISSUE.fields.summary
+        Write-Debug "Setting field for issue: $($_.key - $ISSUE_SUMMARY)"
+        $NEW_ISSUE_VALUE = ''
+        if ($New_Value -eq 'CUSTOM_FUNCTION') {
+            #$NEW_ISSUE_VALUE = '[' + $ISSUE_KEY + ': ' + $ISSUE_SUMMARY + '|https://' + $env:AtlassianPowerKit_AtlassianAPIEndpoint + '/servicedesk/customer/portal/7/' + $ISSUE_KEY + ']'
+            $NEW_ISSUE_VALUE = '[GRCOSM-767: ISMF Meeting - 20240404|https://cpksystems.atlassian.net/browse/GRCOSM-767]'
+            Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref 'customfield_10132' -New_Value $NEW_ISSUE_VALUE -FieldType $FieldType
+        }
+        else {
+            $NEW_ISSUE_VALUE = $New_Value
+            Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref $Field_Ref -New_Value $NEW_ISSUE_VALUE -FieldType $FieldType
+        }
+    }
 }
 
 # function to get changes from a Jira issue change log that are from a value to null
@@ -962,7 +997,7 @@ function Set-JiraProjectProperty {
     try {
         $content = Get-Content $JSON_FILE
         # validate the JSON content
-        $json = $content | ConvertFrom-Json
+        $content | ConvertFrom-Json | Out-Null
     }
     catch {
         Write-Debug "File not found or invalid JSON: $JSON_FILE"
@@ -1027,6 +1062,7 @@ function Get-JiraIssueLinkTypes {
     $REST_RESULTS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issueLinkType" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
     #Write-Debug $REST_RESULTS.getType()
     #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+    Write-Debug "Available JIRA Issue Link Types: $($REST_RESULTS.issueLinkTypes.name -join ', ')"
     return $REST_RESULTS
 }
 
@@ -1037,73 +1073,186 @@ function Set-IssueLinkTypeByJQL {
     param (
         [Parameter(Mandatory = $true)]
         [string]$JQL_STRING,
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
         [string]$CURRNT_LINK_TYPE,
         [Parameter(Mandatory = $true)]
-        [string]$NEW_LINK_TYPE_OR_NONE
+        [string]$NEW_LINK_TYPE_OR_NONE,
+        [Parameter(Mandatory = $false)]
+        [string]$LINK_DIRECTION_FOR_JQL = 'outward',
+        [Parameter(Mandatory = $false)]
+        [string]$TARGET_ISSUE_KEY,
+        [Parameter(Mandatory = $false)]
+        [switch]$force
     )
+    $ISSUELINK_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issueLink"
+    # INPUT VALIDATION
+    ## PARAMTERS
+    ### Issue links for JQL query results can be created, updated or deleted
+    #### Where create, required parameters are JQL_STRING, NEW_LINK_TYPE_OR_NONE, LINK_DIRECTION_FOR_JQL and TARGET_ISSUE_KEY
+    #### Where updated  or removed, required parameters are JQL_STRING, CURRNT_LINK_TYPE, NEW_LINK_TYPE_OR_NONE
+    if ($NEW_LINK_TYPE_OR_NONE -and $JQL_STRING) {
+        if ($NEW_LINK_TYPE_OR_NONE -ieq 'None') {
+            # JUST REMOVE THE LINK
+            Write-Output 'Removing link!'
+            # Get link type to remove from user
+            if (! $CURRNT_LINK_TYPE) {
+                $CURRNT_LINK_TYPE = Read-Host -Prompt 'Please provide the link type to remove'
+            }
+            Write-Debug "Removing link type: $CURRNT_LINK_TYPE from JQL query results: $JQL_STRING"
+            if (! $force) {
+                Write-Warning "This will remove all links of type: $CURRNT_LINK_TYPE from the JQL query results: $JQL_STRING"
+                $CONFIRM = Read-Host -Prompt 'Are you sure you want to continue? [Y/N]'
+                if ($CONFIRM -ne 'Y') {
+                    Write-Warning 'Operation cancelled...'
+                    return
+                }
+                else {
+                    Write-Warning 'Proceeding !'
+                }
+            }
+            else {
+                Write-Warning "Force flag set, removing all links of type: $CURRNT_LINK_TYPE from the JQL query results: $JQL_STRING"
+            }
+        }
+        elseif ((! $CURRNT_LINK_TYPE) -and $NEW_LINK_TYPE_OR_NONE -and $JQL_STRING) {
+            #JUST CREATE A NEW LINK
+            # Read from user the target issue key (asking for it)
+            if (! $TARGET_ISSUE_KEY) {
+                $TARGET_ISSUE_KEY = Read-Host -Prompt 'Please provide the target issue key for the link'
+            }
+            if (! $LINK_DIRECTION_FOR_JQL) {
+                $LINK_DIRECTION_FOR_JQL = Read-Host -Prompt 'Please provide the link direction for the JQL query results either inward or outward [inward]'
+            }
+            if ($LINK_DIRECTION_FOR_JQL -ne 'inward' -and $LINK_DIRECTION_FOR_JQL -ne 'outward') {
+                Write-Error "Invalid link direction: $LINK_DIRECTION_FOR_JQL. Please provide either 'inward' or 'outward'"
+                return
+            }
+            Write-Debug "Creating link type: $NEW_LINK_TYPE_OR_NONE from JQL query results: $JQL_STRING to $TARGET_ISSUE_KEY"
+        }
+        else {
+            Write-Debug "Updating link type: $CURRNT_LINK_TYPE to $NEW_LINK_TYPE_OR_NONE from JQL query results: $JQL_STRING"
+        }
+    }
+    else {        
+        Write-Debug 'Issue links for JQL query results can be created, updated or deleted'
+        Write-Debug 'To create a link, required parameters are JQL_STRING, NEW_LINK_TYPE_OR_NONE, LINK_DIRECTION_FOR_JQL and TARGET_ISSUE_KEY'
+        Write-Debug 'To update or remove a link, required parameters are JQL_STRING, CURRNT_LINK_TYPE, NEW_LINK_TYPE_OR_NONE'
+        Write-Error 'Invalid parameters. Please provide the required parameters for the operation you want to perform.'
+        return
+    }
+
+    ## LINK TYPE
     $AVAILABLE_LINK_TYPES = Get-JiraIssueLinkTypes
-    
-    if ($NEW_LINK_TYPE_OR_NONE -ne 'None') {
+    if ($NEW_LINK_TYPE_OR_NONE -ine 'None') {
         if (! $($AVAILABLE_LINK_TYPES.issueLinkTypes) | Where-Object { $_.name -eq $NEW_LINK_TYPE_OR_NONE }) {
             Write-Error "New link type: $NEW_LINK_TYPE_OR_NONE is not a valid link type. Please use one of the following: $($AVAILABLE_LINK_TYPES.name -join ', '), or 'None' to remove the link."
             return
         }
     }
-    $ISSUELINK_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issueLink"
+    ## Check Target Issue Key
+    if ($TARGET_ISSUE_KEY) {
+        Write-Debug "Checking if target issue key: $TARGET_ISSUE_KEY exists..."
+        if (! (Test-JiraIssueExists -KeyOrID $TARGET_ISSUE_KEY)) {
+            Write-Error "Target issue key: $TARGET_ISSUE_KEY does not exist. Please provide a valid issue key."
+            return
+        }
+    }
+
+    # FUNCTION to create a new link
+    function New-JiraIssueLink {
+        param (
+            [Parameter(Mandatory = $true)]
+            [string]$LINK_TYPE,
+            [Parameter(Mandatory = $true)]
+            [string]$INWARD_ISSUE_KEY,
+            [Parameter(Mandatory = $true)]
+            [string]$OUTWARD_ISSUE_KEY
+        )
+        $PAYLOAD = @{
+            type         = @{
+                name = $LINK_TYPE
+            }
+            inwardIssue  = @{
+                key = $INWARD_ISSUE_KEY
+            }
+            outwardIssue = @{
+                key = $OUTWARD_ISSUE_KEY
+            }
+        }
+        $LINK_EXISTS = Get-JiraIssueLinks -IssueKey $THIS_ISSUE.key | Where-Object { $_.type.name -eq $NEW_LINK_TYPE_OR_NONE -and $_.inwardIssue.key -eq $INWARD_ISSUE_KEY -and $_.outwardIssue.key -eq $OUTWARD_ISSUE_KEY }
+        if (! $LINK_EXISTS) {
+            Write-Debug "Creating new link [type = $NEW_LINK_TYPE_OR_NONE] from $INWARD_ISSUE_KEY to $OUTWARD_ISSUE_KEY"
+            Invoke-RestMethod -Uri $ISSUELINK_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body ($PAYLOAD | ConvertTo-Json -Depth 10) -ContentType 'application/json'
+        }
+        else {
+            Write-Debug 'Link already exists... skipping <---------------------------------------'
+        }
+    }
+
+    function Remove-JiraIssueLink {
+        param (
+            [Parameter(Mandatory = $true)]
+            [string]$LINK_ID
+        )
+        Write-Debug "Removing link: $LINK_ID"
+        try {
+            Invoke-RestMethod -Uri "$ISSUELINK_ENDPOINT/$LINK_ID" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Delete -ContentType 'application/json'
+        } 
+        catch {
+            Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
+            Write-Error "Error updating field: $($_.Exception.Message)"
+        }
+        Write-Debug "Link removed: $LINK_ID"
+    }
+    ### JQL QUERY
+    Write-Debug "Runniong JQL Query: $JQL_STRING"
     $REST_RESULTS = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -RETURN_FIELDS @('id', 'key')
 
     $REST_RESULTS.issues | ForEach-Object {
         $THIS_ISSUE = $_
-        $HALF_LINKS = Get-JiraIssueLinks -IssueKey $THIS_ISSUE.key | Where-Object { $_.type.name -eq $CURRNT_LINK_TYPE }
-        $HALF_LINKS | ForEach-Object {
-            $CURRNT_HALF_LINK = $_
-            if ($NEW_LINK_TYPE_OR_NONE -ne 'None') {
+        if ($NEW_LINK_TYPE_OR_NONE -ine 'None') {
+            if ($LINK_DIRECTION_FOR_JQL -eq 'inward') {
+                $INWARD_ISSUE_KEY = $THIS_ISSUE.key
+                $OUTWARD_ISSUE_KEY = $TARGET_ISSUE_KEY
+            }
+            else {
+                $INWARD_ISSUE_KEY = $TARGET_ISSUE_KEY
+                $OUTWARD_ISSUE_KEY = $THIS_ISSUE.key
+            }
+            New-JiraIssueLink -LINK_TYPE $NEW_LINK_TYPE_OR_NONE -INWARD_ISSUE_KEY $INWARD_ISSUE_KEY -OUTWARD_ISSUE_KEY $OUTWARD_ISSUE_KEY
+        }
+        if ($CURRNT_LINK_TYPE) {
+            # We are updating or removing a link
+            $HALF_LINKS = Get-JiraIssueLinks -IssueKey $($THIS_ISSUE.key) | Where-Object { $_.type.name -eq $CURRNT_LINK_TYPE }
+            $HALF_LINKS | ForEach-Object {
+                $CURRNT_HALF_LINK = $_
+                if ($NEW_LINK_TYPE_OR_NONE -ine 'None') {
+                    try {
+                        # First check if the new link type already exists
+                        New-JiraIssueLink -LINK_TYPE $NEW_LINK_TYPE_OR_NONE -INWARD_ISSUE_KEY $INWARD_ISSUE_KEY -OUTWARD_ISSUE_KEY $OUTWARD_ISSUE_KEY
+                    }
+                    catch {
+                        Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
+                        Write-Error "Error updating field: $($_.Exception.Message)"
+                    }
+                }
+                else {
+                    Write-Debug "Issue Key: $($THIS_ISSUE.key) - Link Type Name: $($_.type.name), no new link type specified, just removing..."
+                }
+                # Write-Debug "New was created: $($NEW_LINK | ConvertTo-Json -Depth 10)"
+                write-Debug '#################################################################'
                 $CURRNT_LINK_FULL = Invoke-RestMethod -Uri $($CURRNT_HALF_LINK.self) -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
-                $INWARD_ISSUE_KEY = $CURRNT_LINK_FULL.inwardIssue.key
-                $OUTWARD_ISSUE_KEY = $CURRNT_LINK_FULL.outwardIssue.key
-                $PAYLOAD = @{
-                    type         = @{
-                        name = $NEW_LINK_TYPE_OR_NONE
-                    }
-                    inwardIssue  = @{
-                        key = $INWARD_ISSUE_KEY
-                    }
-                    outwardIssue = @{
-                        key = $OUTWARD_ISSUE_KEY
-                    }
-                }
+                Write-Debug "Removing link: $($CURRNT_LINK_FULL.type.name) [$($CURRNT_LINK_FULL.id)] from $($CURRNT_LINK_FULL.inwardIssue.key) to $($CURRNT_LINK_FULL.outwardIssue.key)"
                 try {
-                    # First check if the new link type already exists
-                    $LINK_EXISTS = Get-JiraIssueLinks -IssueKey $THIS_ISSUE.key | Where-Object { $_.type.name -eq $NEW_LINK_TYPE_OR_NONE -and $_.inwardIssue.key -eq $INWARD_ISSUE_KEY -and $_.outwardIssue.key -eq $OUTWARD_ISSUE_KEY }
-                    if (! $LINK_EXISTS) {
-                        Write-Debug "Creating new link [type = $NEW_LINK_TYPE_OR_NONE] from $INWARD_ISSUE_KEY to $OUTWARD_ISSUE_KEY"
-                        Invoke-RestMethod -Uri $ISSUELINK_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body ($PAYLOAD | ConvertTo-Json -Depth 10) -ContentType 'application/json'
-                    }
-                    else {
-                        Write-Debug 'Link already exists... skipping <---------------------------------------'
-                    }
-                }
+                    Remove-JiraIssueLink -LINK_ID $($CURRNT_LINK_FULL.id)
+                } 
                 catch {
                     Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
                     Write-Error "Error updating field: $($_.Exception.Message)"
                 }
+                Write-Debug "Link removed: [type = $($CURRNT_LINK_FULL.type.name)] from $($CURRNT_LINK_FULL.inwardIssue.key) to $($CURRNT_LINK_FULL.outwardIssue.key)"
+                write-Debug '#################################################################'
             }
-            else {
-                Write-Debug "Issue Key: $THIS_ISSUE.key - Link Type Name: $($_.type.name), no new link type specified, just removing..."
-            }
-            Write-Debug "New was created: $($NEW_LINK | ConvertTo-Json -Depth 10)"
-            write-Debug '#################################################################'
-            Write-Debug "Removing link: $($CURRNT_LINK_FULL.type.name) from $($CURRNT_LINK_FULL.inwardIssue.key) to $($CURRNT_LINK_FULL.outwardIssue.key)"
-            try {
-                Invoke-RestMethod -Uri "$ISSUELINK_ENDPOINT/$($CURRNT_LINK_FULL.id)" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Delete -ContentType 'application/json'
-            } 
-            catch {
-                Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
-                Write-Error "Error updating field: $($_.Exception.Message)"
-            }
-            Write-Debug "Link removed: [type = $($CURRNT_LINK_FULL.type.name)] from $($CURRNT_LINK_FULL.inwardIssue.key) to $($CURRNT_LINK_FULL.outwardIssue.key)"
-            write-Debug '#################################################################'
         }
     }
 }

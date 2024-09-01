@@ -88,6 +88,7 @@
         'Remove-RemoteIssueLink',
         'Set-JiraCloudAPIEndpoint',
         'Set-JiraCustomField',
+        'Set-JiraIssueFieldForJQLQueryResults',
         'Set-JiraIssueField',
         'Set-JiraProjectProperty',
         'Get-OSMPlaceholdersJira',
