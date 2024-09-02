@@ -457,7 +457,7 @@ function New-SharePointConfluenceObjectMapping {
     $SHAREPOINT_FILES = Get-SharePointFileMetadata -TenantName $TenantName -SiteName $SiteName -FOLDER_PATH_OR_NAME $FOLDER_NAME -SOURCE_FILENAME $CANDIDATE_FILE_PATTERN
 }
 
-Install-AtlassianPowerKitGRCosmDependencies
+#Install-AtlassianPowerKitGRCosmDependencies
 if ($ReAuth) {
     if (!$TenantName) {
         $TenantName = Read-Host -Prompt 'Enter the Tenant Name'
@@ -465,4 +465,4 @@ if ($ReAuth) {
     Connect-MgGraphScoped -RequiredScopes $MS_GRAPH_SCOPES -TenantName $TenantName
 }
 
-# Funtion 
+# Funtion to 

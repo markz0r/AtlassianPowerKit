@@ -21,7 +21,7 @@
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-Set-Location $PSScriptRoot
+Push-Location $PSScriptRoot
 $script:AtlassianPowerKitRequiredModules = @('PowerShellGet', 'Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
 $script:LOCAL_MODULES = $(Get-ChildItem -Path . -Recurse -Depth 1 -Include *.psd1 -Exclude 'AtlassianPowerKit.psd1', 'AtlassianPowerKit-Shared.psd1', 'Naive-ConflunceStorageValidator.psd1')
 
@@ -177,18 +177,19 @@ function New-AtlassianPowerKitProfile {
 
 # Function to list availble profiles with number references for interactive selection or 'N' to create a new profile
 function Show-AtlassianPowerKitProfileList {
+    Get-AtlassianPowerKitProfileList
     $profileIndex = 0
-    if (!$env:AtlassianPowerKit_PROFILE_LIST) {
-        Write-Host 'No profiles found. Please create a new profile.'
+    if (!$env:AtlassianPowerKit_PROFILE_LIST_STRING) {
+        Write-Host 'Please create a new profile.'
         New-AtlassianPowerKitProfile
-        Write-Debug "Profile List: $(Get-AtlassianPowerKitProfileList)"
+        #Write-Debug "Profile List: $(Get-AtlassianPowerKitProfileList)"
         Show-AtlassianPowerKitProfileList
     } 
     else {
-        Write-Debug "Profile list: $env:AtlassianPowerKit_PROFILE_LIST"
-        $PROFILE_LIST = $env:AtlassianPowerKit_PROFILE_LIST.split()
-        Write-Debug "Profile list array $PROFILE_LIST"
-        $PROFILE_LIST | ForEach-Object {
+        #Write-Debug "Profile list: $env:AtlassianPowerKit_PROFILE_LIST_STRING"
+        $PROFILE_LIST = $env:AtlassianPowerKit_PROFILE_LIST_STRING.split()
+        Write-Debug "Profile list string $env:AtlassianPowerKit_PROFILE_LIST_STRING"
+        $env:AtlassianPowerKit_PROFILE_LIST_STRING.split() | ForEach-Object {
             Write-Host "[$profileIndex] $_"
             $profileIndex++
         }
@@ -230,49 +231,47 @@ function Use-AtlassianPowerKit {
         [Parameter(Mandatory = $false)]
         [switch] $ResetVault
     )
-    Get-RequisitePowerKitModules
-    if ($ResetVault) {
-        Clear-AtlassianPowerKitVault
-        return $null
-    }
-    if ($ArchiveProfileDirs) {
-        Clear-AtlassianPowerKitProfileDirs
-        return $null
-    }
-    $env:AtlassianPowerKit_PROFILE_NAME = $null
-    #Write-Debug "Profile List: $(Get-AtlassianPowerKitProfileList)"
-    if (!$ProfileName) {
-        if (!$FunctionName) {
-            Write-Host 'No profile name provided. Check the profiles available.'
-            try {
-                $ProfileName = Show-AtlassianPowerKitProfileList
-                Set-AtlassianPowerKitProfile $ProfileName
-            }
-            catch {
-                Write-Host 'No profile selected. Exiting...'
-                return $null
-            }
+    try {
+        Get-RequisitePowerKitModules
+        if ($ResetVault) {
+            Clear-AtlassianPowerKitVault
+            return $null
         }
-        else {
-            Write-Debug "Example: Use-AtlassianPowerKit -ProfileName 'profileName' -FunctionName 'functionName'"
-            Write-Error 'No -ProfileName provided with FunctionName, Exiting...'
+        if ($ArchiveProfileDirs) {
+            Clear-AtlassianPowerKitProfileDirs
+            return $null
         }
-    } 
-    else {
+        if (!$ProfileName) {
+            if (!$FunctionName) {
+                Write-Host 'No profile name provided. Check the profiles available.'
+                try {
+                    Clear-AtlassianPowerKitProfile
+        
+                    $ProfileName = Show-AtlassianPowerKitProfileList
+                }
+                catch {
+                    Write-Host 'No profile selected. Exiting...'
+                    return $null
+                }
+            }
+            else {
+                Write-Debug "Example: Use-AtlassianPowerKit -ProfileName 'profileName' -FunctionName 'functionName'"
+                Write-Error 'No -ProfileName provided with FunctionName, Exiting...'
+            }
+        } 
         try {
             $ProfileName = $ProfileName.Trim().ToLower()
-            Write-Debug "Setting provided profile: $ProfileName"
-            Set-AtlassianPowerKitProfile $ProfileName
+            Set-AtlassianPowerKitProfile -ProfileName $ProfileName
+            #Write-Debug "Setting provided profile: $ProfileName"
+            #Set-AtlassianPowerKitProfile $ProfileName
             if (!$env:AtlassianPowerKit_PROFILE_NAME -or ($env:AtlassianPowerKit_PROFILE_NAME -ne $ProfileName)) {
-                Throw 'Profile not loaded! Exiting...'
-            }
+                    Throw 'Profile not loaded! Exiting...'
+                }
         }
         catch {
-            Write-Error "Unable to set profile $ProfileName. Exiting..."
+                Write-Debug "Unable to set profile $ProfileName. Exiting..."
+                throw "Unable to set profile $ProfileName. Exiting..."
         }
-    }
-    if ($env:AtlassianPowerKit_PROFILE_NAME) {
-        Write-Host "Profile loaded: $($env:AtlassianPowerKit_PROFILE_NAME)"
         if (!$FunctionName) {
             Show-AtlassianPowerKitFunctions
         }
@@ -285,6 +284,13 @@ function Use-AtlassianPowerKit {
                 Write-Error "Function $FunctionName failed. Exiting..."
             }
         }
-        Show-AtlassianPowerKitFunctions
+    }
+    catch {
+        Write-Debug "Exiting - with error: $($_.Exception.Message)"
+    }
+    finally {
+        Clear-AtlassianPowerKitProfile
+        Pop-Location
+        Write-Debug "Gracefully exited AtlassianPowerKit"
     }
 }

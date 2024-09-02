@@ -74,7 +74,7 @@
         'Register-AtlassianPowerKitVault',
         'Get-AtlassianPowerKitProfileList',
         'Set-AtlassianPowerKitProfile',
-        'Reset-AtlassianPowerKitProfile',
+        'Clear-AtlassianPowerKitProfile',
         'Register-AtlassianPowerKitProfile',
         'Clear-AtlassianPowerKitVault',
         'Get-AtlassianSelectedProfile',

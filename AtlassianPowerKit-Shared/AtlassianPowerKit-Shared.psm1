@@ -184,8 +184,8 @@ function Set-AtlassianPowerKitProfile {
     }
     # Check if the profile exists
     Get-AtlassianPowerKitProfileList
-    if (!$env:AtlassianPowerKit_PROFILE_LIST.Contains($ProfileName)) {
-        Write-Debug "Profile $ProfileName does not exists in the vault - we have: $env:AtlassianPowerKit_PROFILE_LIST"
+    if (!$env:AtlassianPowerKit_PROFILE_LIST_STRING.Contains($ProfileName)) {
+        Write-Debug "Profile $ProfileName does not exists in the vault - we have: $env:AtlassianPowerKit_PROFILE_LIST_STRING"
         return $false
     }
     else {
@@ -295,7 +295,7 @@ function Register-AtlassianPowerKitProfile {
         Register-AtlassianPowerKitVault
     }
     # Check if the profile already exists in the secret vault
-    if ($null -ne $env:AtlassianPowerKit_PROFILE_LIST -and $env:AtlassianPowerKit_PROFILE_LIST.Count -gt 0 -and $env:AtlassianPowerKit_PROFILE_LIST.Contains($ProfileName)) {
+    if ($null -ne $env:AtlassianPowerKit_PROFILE_LIST_STRING -and $env:AtlassianPowerKit_PROFILE_LIST_STRING.Count -gt 0 -and $env:AtlassianPowerKit_PROFILE_LIST_STRING.Contains($ProfileName)) {
         Write-Debug "Profile $ProfileName already exists."
         # Create a hashtable of the profile data to store in the secret vault
         return $false
@@ -322,15 +322,15 @@ function Register-AtlassianPowerKitProfile {
     }
     Write-Debug "Profile $ProfileName created successfully in $script:VAULT_NAME."
     Write-Debug 'Clearing existing profiles selection...'
-    Reset-AtlassianPowerKitProfile
+    Clear-AtlassianPowerKitProfile
     Set-AtlassianPowerKitProfile -ProfileName $ProfileName
 }
 
-function Reset-AtlassianPowerKitProfile {
+function Clear-AtlassianPowerKitProfile {
     # Clear all environment variables starting with AtlassianPowerKit_
     Get-ChildItem env:AtlassianPowerKit_* | ForEach-Object {
         Write-Debug "Removing environment variable: $_"
-        Remove-Item -Path $_.Name -ErrorAction SilentlyContinue
+        rm "env:$($_.Name)" -ErrorAction Continue
     }
 }
 
@@ -377,7 +377,7 @@ function Clear-AtlassianPowerKitVault {
         Interaction     = 'None'
     }
     Reset-SecretStore @storeConfiguration -Force
-    Reset-AtlassianPowerKitProfile
+    Clear-AtlassianPowerKitProfile
 }
 
 function Get-AtlassianPowerKitProfileList {
@@ -394,6 +394,6 @@ function Get-AtlassianPowerKitProfileList {
             return $false
         }
     }
-    $env:AtlassianPowerKit_PROFILE_LIST = $PROFILE_LIST
-    return $PROFILE_LIST
+    $env:AtlassianPowerKit_PROFILE_LIST_STRING = $PROFILE_LIST
+    Write-Debug "Profiles found: $($env:AtlassianPowerKit_PROFILE_LIST_STRING)"
 }
