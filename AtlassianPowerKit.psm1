@@ -45,13 +45,19 @@ function Invoke-AtlassianPowerKitFunction {
         [Parameter(Mandatory = $true)]
         [string] $FunctionName,
         [Parameter(Mandatory = $false)]
-        [string] $ProvidedProfileName,
+        [string] $Profile,
         [Parameter(Mandatory = $false)]
         [hashtable] $FunctionParameters
     )
     Import-NestedModules
-    if ($ProvidedProfileName) {
-        $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $ProvidedProfileName
+    if ($Profile) {
+        if (!(Get-CurrentAtlassianPowerKitProfile)) {
+            $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $Profile
+        } 
+        else {
+            $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile
+            # Test if a profile is loaded, if not, ask the user to select a profile
+        }
     } 
     else {
         $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile

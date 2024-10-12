@@ -402,7 +402,8 @@ function Clear-AtlassianPowerKitVault {
 
 # Function to check if a profile is already loaded
 function Get-CurrentAtlassianPowerKitProfile {
-    if ($env:AtlassianPowerKit_PROFILE_NAME) {
+    if ($env:AtlassianPowerKit_PROFILE_NAME -and $env:AtlassianPowerKit_CloudID) {
+        Write-Debug "Profile $($env:AtlassianPowerKit_PROFILE_NAME) appears loaded..."
         #Write-Debug "Profile $($env:AtlassianPowerKit_PROFILE_NAME) is loaded."
         return $env:AtlassianPowerKit_PROFILE_NAME
     }

@@ -5,6 +5,7 @@
 ## TODO
 
 ## Maybe
+
 - 1password vault integration
 
 ## Quick Start
@@ -13,10 +14,16 @@
 git clone https://github.com/markz0r/AtlassianPowerKit.git
 cd .\AtlassianPowerKit; Import-Module "AtlassianPowerKit.psd1" -Force
 ```
+
 ## Usage
 
 ```powershell
- Use-AtlassianPowerKit
+# Text UI
+AtlassianPowerKit
+# Direct invocation
+Invoke-AtlassianPowerKitFunction -FunctionName "Get-JiraIssue" -FunctionParameters @{"IssueKey"="TEST-1"} -Profile "zoak"
+
+Invoke-AtlassianPowerKitFunction -FunctionName "Get-JiraIssue" -FunctionParameters @{"IssueKey"="ZSM-8359"} -Profile "zoak"
 ```
 
 ## Prerequisites

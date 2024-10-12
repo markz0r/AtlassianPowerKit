@@ -386,6 +386,16 @@ function Export-JiraCloudJQLQueryResultsToJSON {
     return $REST_RESULTS
 }
 
+# Function to get JSON object for a Jira issue
+function Get-JiraIssue {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Key
+    )
+    $ISSUE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issue/$($Key)" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+    $ISSUE | ConvertTo-Json -Depth 30
+}
+
 # Function to get the issuelinks field from a Jira issue
 function Get-JiraIssueLinks {
     param (
