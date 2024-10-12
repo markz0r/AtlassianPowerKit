@@ -119,8 +119,9 @@ function Show-AtlassianPowerKitFunctions {
     # List nested modules and their exported functions to the console in a readable format, grouped by module
     $colors = @('Green', 'Cyan', 'Red', 'Magenta', 'Yellow')
     $localModules = $script:LOCAL_MODULES | ForEach-Object {
-        Write-Debug "Local module: $($_.Name -replace '.psd1', '')"
-        Get-Module -Name $($_.Name -replace '.psd1', '')
+        Write-Debug "Local module: $($_.FullName -replace '.psd1', '')"
+        Import-Module -Name $_.FullName -Force -ErrorAction Stop
+        Get-Module -Name $($_.Name -replace '.psd1', '') -Verbose -ErrorAction Stop
     }
     Write-Debug "Nested modules: $localModules"
 
@@ -128,6 +129,7 @@ function Show-AtlassianPowerKitFunctions {
     $functionReferences = @{}
     $functionReferences[0] = 'Return'
     $localModules | ForEach-Object {
+        Write-Debug "DISPLAYING Module: $($_.Name)"
         # Select a color from the list
         $color = $colors[$colorIndex % $colors.Count]
         $spaces = ' ' * (51 - $_.Name.Length)
@@ -168,19 +170,24 @@ function Show-AtlassianPowerKitFunctions {
     # Attempt to convert the input string to a char
     $selectedFunction = Read-Host -Prompt "`nSelect a function by number or name to run (or hit enter to exit)"
     if ($selectedFunction -match '^\d+$') {
+        Write-Debug "Selected function by num: $selectedFunction"
         $SelectedFunctionName = ($functionReferences[[int]$selectedFunction])
     }
-    elseif ($selectedFunction -match '^\w+$') {
-        try {
-            # Test if the function exists
-            $SelectedFunctionName = ($functionReferences | Where-Object { $_ -eq $selectedFunction })
+    elseif ($selectedFunction -match '^(?i)[a-z]*-[a-z]*$') {
+        # Test if the function exists
+        $selectedFunction = $selectedFunction.Trim().ToLower()
+        Write-Debug "Selected function by name: $selectedFunction"
+        Write-Debug "Function references: $($functionReferences.GetType())"
+        if ($functionReferences.Values -contains $selectedFunction) {
+            $SelectedFunctionName = $selectedFunction
         }
-        catch {
-            Write-Error "Function $selectedFunction not found"
+        else {
+            Write-Error "Function $SelectedFunctionName does not exist in the function references."
         }
     }
     # if selected function is Return, exit the function
     if (!$SelectedFunctionName -or ($SelectedFunctionName -eq 0)) {
+        Write-Debug 'No function selected. Exiting'
         return $false
     } 
     # Run the selected function timing the execution
@@ -272,7 +279,7 @@ function Show-AtlassianPowerKitProfileList {
 function AtlassianPowerKit {
     param (
         [Parameter(Mandatory = $false)]
-        [string] $InputProfileName,
+        [string] $Profile,
         [Parameter(Mandatory = $false)]
         [switch] $ArchiveProfileDirs,
         [Parameter(Mandatory = $false)]
@@ -292,7 +299,7 @@ function AtlassianPowerKit {
             Clear-AtlassianPowerKitProfileDirs
             return $null
         }
-        if (!$InputProfileName) {
+        if (!$Profile) {
             if (!$FunctionName) {
                 Write-Host 'No profile name provided. Check the profiles available.'
                 try {
@@ -308,7 +315,7 @@ function AtlassianPowerKit {
                 Write-Error 'No -ProfileName provided with FunctionName, Exiting...'
             }
         } 
-        $InputProfileName = $InputProfileName.Trim().ToLower()
+        $InputProfileName = $Profile.Trim().ToLower()
         $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $InputProfileName
         #Write-Debug "Setting provided profile: $ProfileName"
         #Set-AtlassianPowerKitProfile $ProfileName
@@ -340,7 +347,7 @@ function AtlassianPowerKit {
         Write-Debug "Exiting - with error: $($_.Exception.Message)"
     }
     finally {
-        Clear-AtlassianPowerKitProfile
+        #Clear-AtlassianPowerKitProfile
         #Pop-Location
         Write-Debug 'Gracefully exited AtlassianPowerKit'
     }

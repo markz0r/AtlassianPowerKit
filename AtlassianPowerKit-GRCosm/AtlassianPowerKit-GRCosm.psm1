@@ -48,61 +48,7 @@ class ConfluenceMetadataObject {
     }
 }
 
-#  funciton to install, update, and import POWERSHELL_MODULE_DEPS
-function Install-AtlassianPowerKitGRCosmDependencies {
-    param (
-        [Parameter(Mandatory = $false)]
-        [switch] $InstallDependencies = $false
-    )
-    if ($InstallDependencies) {
-        Write-Debug "Installing dependencies: $POWERSHELL_MODULE_DEPS"
-        $POWERSHELL_MODULE_DEPS | ForEach-Object {
-            if (-not (Get-Module -ListAvailable -Name $_)) {
-                Install-Module -Name $_ -Force -Scope CurrentUser -AllowClobber
-            }
-            else {
-                Write-Debug "Module $_ already installed"
-            }
-            # Provide warning message to user if module has update available
-            $module = Get-Module -ListAvailable -Name $_ | Sort-Object Version -Descending
-            $latest_version = Find-Module -Name $_ | Select-Object -ExpandProperty Version
-            $module | ForEach-Object { 
-                if ($_.Version -lt $latest_version) {
-                    Write-Warning "Module $_ has an update available. Run 'Update-Module -Name $_' to update."
-                    Write-Debug "Module $_ version: $($_.Version), available version: $latest_version"
-                }
-            }
-            # If there area multiple versions of the module installed, advise user how to uninstall only the older version/s
-            # Get the latest installed version of the module
-            $OLDER_VERSIONS = Get-Module -ListAvailable -Name $_ | Sort-Object Version -Descending | Select-Object -Skip 1
-            if ($OLDER_VERSIONS) {
-                #Write-Warning "Multiple versions of module $_ are installed. Run 'Uninstall-Module -Name $_ -RequiredVersion ' to uninstall the older version/s."
-                $OLDER_VERSIONS | ForEach-Object { 
-                    #Write-Debug "Older version: $($_.Version)" 
-                    Write-Debug "MULTIPLE VERSIONS of $($_.Name), [$OLDER_VERSIONS]"
-                    Write-Debug "Uninstall-Module -Name $($_.Name) -RequiredVersion $($_.Version) -Force"
-                }
-            }
-            # Import the latest available version of the module into the current session
-            Import-Module -Name $_
-            Write-Debug "...  $_ imported successfully"
-        }
-    }
-    else {
-        try {
-            $POWERSHELL_MODULE_DEPS | ForEach-Object {
-                Import-Module -Name $_
-                Write-Debug "...  $_ imported successfully"
-            }
-        }
-        catch {
-            Write-Error "Error importing module $_ - Run 'Install-AtlassianPowerKitGRCosmDependencies -InstallDependencies' to install dependencies"
-        }
-    }
-
-}
-
-function Create-ConfluencePageStructure {
+function Set-ConfluencePageStructure {
     param (
         [Parameter(Mandatory = $true)]
         [string]$CONFLUENCE_SPACE_KEY,
@@ -113,8 +59,8 @@ function Create-ConfluencePageStructure {
         [Parameter(Mandatory = $true)]
         [string]$CONFLUENCE_PAGE_TEMPLATE_PATH
     )
+    
     # Ensure the AtlasianPowerKit-GRCosm dependencies are installed
-    Install-AtlassianPowerKitGRCosmDependencies -InstallDependencies
     # Check template file exists
     if (-not (Test-Path $CONFLUENCE_PAGE_TEMPLATE_PATH)) {
         Write-Error "Create-ConfluencePageStructure: Template file not found: $CONFLUENCE_PAGE_TEMPLATE_PATH"
