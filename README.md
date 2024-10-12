@@ -21,9 +21,7 @@ cd .\AtlassianPowerKit; Import-Module "AtlassianPowerKit.psd1" -Force
 # Text UI
 AtlassianPowerKit
 # Direct invocation
-Invoke-AtlassianPowerKitFunction -FunctionName "Get-JiraIssue" -FunctionParameters @{"IssueKey"="TEST-1"} -Profile "zoak"
-
-Invoke-AtlassianPowerKitFunction -FunctionName "Get-JiraIssue" -FunctionParameters @{"IssueKey"="ZSM-8359"} -Profile "zoak"
+Invoke-AtlassianPowerKitFunction -FunctionName "Get-JiraIssue" -FunctionParameters @{"Key"="TEST-1"} -Profile "zoak"
 ```
 
 ## Prerequisites
