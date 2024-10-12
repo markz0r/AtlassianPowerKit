@@ -1,3 +1,4 @@
+$ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 <#
 .SYNOPSIS
     Atlassian Cloud PowerShell Module for handy functions to interact with Attlassian Cloud APIs.
@@ -6,15 +7,7 @@
 GitHub: https://github.com/markz0r/AtlassianPowerKit
 
 #>
-param(
-    [parameter(Position = 0, Mandatory = $false)][boolean]$ReAuth = $false,
-    [parameter(Position = 1, Mandatory = $false)][string]$TenantName
-)
-$ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-$POWERSHELL_MODULE_DEPS = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Sites', 'Microsoft.Graph.Files')
-$MS_GRAPH_SCOPES = @('Files.Read.All', 'Sites.Read.All') # Required scopes for listing SharePoint documents and retrieving the unique identifier
-$AC_LOCAL_ID = ''
-$AC_MACRO_ID = ''
+
 
 # Create class for FILE_INFO_ARRAY
 class ConfluenceMetadataObject {
@@ -106,6 +99,56 @@ function Install-AtlassianPowerKitGRCosmDependencies {
             Write-Error "Error importing module $_ - Run 'Install-AtlassianPowerKitGRCosmDependencies -InstallDependencies' to install dependencies"
         }
     }
+
+}
+
+function Create-ConfluencePageStructure {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$CONFLUENCE_SPACE_KEY,
+        [Parameter(Mandatory = $true)]
+        [string]$CONFLUENCE_PARENT_PAGE_ID,
+        [Parameter(Mandatory = $true)]
+        [string]$CONFLUENCE_PAGE_STRUCTURE_JSON,
+        [Parameter(Mandatory = $true)]
+        [string]$CONFLUENCE_PAGE_TEMPLATE_PATH
+    )
+    # Ensure the AtlasianPowerKit-GRCosm dependencies are installed
+    Install-AtlassianPowerKitGRCosmDependencies -InstallDependencies
+    # Check template file exists
+    if (-not (Test-Path $CONFLUENCE_PAGE_TEMPLATE_PATH)) {
+        Write-Error "Create-ConfluencePageStructure: Template file not found: $CONFLUENCE_PAGE_TEMPLATE_PATH"
+    }
+
+}
+
+function Update-GRCosmConfRegister {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$CONFLUENCE_SPACE_KEY,
+        [Parameter(Mandatory = $true)]
+        [string]$CONF_PAGE_ID,
+        [Parameter(Mandatory = $true)]
+        [string]$FILTER_ID,
+        [Parameter(Mandatory = $true)]
+        [string]$REGISTER_STORAGE_TEMPLATE_PATH
+    )
+    # Ensure the AtlasianPowerKit-GRCosm dependencies are installed
+    
+
+    # Check template file exists
+    if (-not (Test-Path $REGISTER_STORAGE_TEMPLATE_PATH)) {
+        Write-Error "Update-GRCosmConfRegister: Template file not found: $REGISTER_STORAGE_TEMPLATE_PATH"
+    }
+    # Backup the Confluence page storage format
+    $BACKUP_FILE = Export-ConfluencePageStorageFormat -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_ID $CONF_PAGE_ID
+    Write-Debug "Backup file: $BACKUP_FILE"
+
+    # Get JIRA filter data - Fields are determined by the JIRA filter
+    $CONF_REGISTER_TABLE_DATA = Get-JiraFilterResultsAsConfluenceTable -FILTER_ID $FILTER_ID
+    $UPDATED_PAGE_STORAGE_DATA = Get-Content $REGISTER_STORAGE_TEMPLATE_PATH
+    # Replate 'GRCOSM_REGISTER_TABLE_DATA' with $CONF_REGISTER_TABLE_DATA
+    $UPDATED_PAGE_STORAGE_DATA = $UPDATED_PAGE_STORAGE_DATA -replace 'GRCOSM_REGISTER_TABLE_DATA', $CONF_REGISTER_TABLE_DATA
 
 }
 
@@ -428,16 +471,6 @@ function New-ConfluencePolicyViewerSharePoint {
     $TEMPLATE_INPUT_ARRAY | Set-Content -Path $OUTPUT_FILE -Force
 }
 
-# Function to generate Statement of Applicability Confluence Pages
-function Convert-JIRAFilterToConfluencePage {
-    param (
-        [Parameter(Mandatory = $false)]
-        [string]$PATH_TO_BACKUP = "$env:AtlassianPowerKit_PROFILE_NAME\snapshots\confluence\",
-        [Parameter(Mandatory = $false)]
-        [string]$PATH_TO_TEMPLATE = "templates\confluence\$env:AtlassianPowerKit_PROFILE_NAME-GRCosm-JIRAFilterViewer-Template.confluence"
-    
-    )
-}
 
 # Function to generate SharePoint - Confluence object mapping
 function New-SharePointConfluenceObjectMapping {

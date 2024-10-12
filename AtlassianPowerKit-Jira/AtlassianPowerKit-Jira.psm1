@@ -68,7 +68,29 @@ GitHub: https://github.com/markz0r/AtlassianPowerKit
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 
-function Get-JiraFilterResults {
+function Convert-JiraIssueToTableRow {
+    param (
+        [Parameter(Mandatory = $true)]
+        [System.Object]$ISSUE,
+        [Parameter(Mandatory = $true)]
+        [System.Object]$COLUMN_VALS
+    )
+    $TABLE_ROW = '<tr>'
+    $COLUMN_VALS | ForEach-Object {
+        $COLUMN_NAME = $_.id
+        $COLUMN_VAL = $ISSUE.fields.$COLUMN_NAME
+        if ($COLUMN_VAL) {
+            $TABLE_ROW += "<td><p>$COLUMN_VAL</p></td>"
+        }
+        else {
+            $TABLE_ROW += '<td><p></p></td>'
+        }
+    }
+    $TABLE_ROW += '</tr>'
+    return $TABLE_ROW
+}
+
+function Get-JiraFilterResultsAsConfluenceTable {
     param (
         [Parameter(Mandatory = $true)]
         [string]$FILTER_ID
@@ -78,7 +100,22 @@ function Get-JiraFilterResults {
 
     $FILTER_COLUMNS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/filter/$($FILTER_ID)/columns" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
     $COLUMN_VALS = $FILTER_COLUMNS.value
-    $JIRA_ISSUES = Get-JiraCloudJQLQueryResult -JQL_STRING $FILTER_INFO.jql -RETURN_FIELDS $COLUMN_VALS
+    $JIRA_ISSUES_JSON_FILE_PATH = Get-JiraCloudJQLQueryResult -JQL_STRING $FILTER_INFO.jql -RETURN_FIELDS $COLUMN_VALS -JIRA_FIELD_MAPS $(Get-JIRAFieldMap)
+    #$JIRA_ISSUES_RETURN = $JIRA_ISSUES_RAW | ConvertTo-Json | ConvertFrom-Json -Depth 30
+    # Read the JSON file
+    $jsonContent = $(Get-Content -Path $JIRA_ISSUES_JSON_FILE_PATH -Raw | ConvertFrom-Json)
+
+    # Initialize an array to hold all issues
+    $allIssues = @()
+
+    # Iterate through each JSON object in the array
+    foreach ($jsonObject in $jsonContent) {
+        # Check if the jsonObject has an issues property
+        if ($jsonObject.PSObject.Properties.Name -contains 'issues') {
+            # Merge the issues arrays
+            $allIssues += $jsonObject.issues
+        }
+    }
     # Get the filter results with just the filter columns
     #
     $TABLE_HEADERS = '<tbody><tr>'
@@ -93,11 +130,28 @@ function Get-JiraFilterResults {
     Write-Debug 'Header: '
     Write-Debug $TABLE_HEADERS
     Write-Debug '##########################################################'
-    Write-Debug "Filter Results [$($JIRA_ISSUES.issues.Count)]: "
-    Write-Debug $($JIRA_ISSUES | ConvertTo-Json -Depth 10)
+    Write-Debug "Filter Results [$($allIssues.Count)]: "
+    $TABLE_ROWS = foreach ($issue in $allIssues) {
+        return Convert-JiraIssueToTableRow -ISSUE $_ -COLUMN_VALS $COLUMN_VALS
+    }
+    # first 5 rows
+    $TABLE_ROWS | Select-Object -First 5 | ForEach-Object {
+        Write-Debug "Row: $_"
+    }
+    Write-Debug '##########################################################'
     Write-Debug '##########################################################'
     Write-Debug 'Footer: '
     Write-Debug $CONFLUENCE_STORAGE_RAW_FOOTER
+    Write-Debug '##########################################################'
+    $CONFLUENCE_STORAGE_RAW = $TABLE_HEADERS
+    
+    $CONFLUENCE_STORAGE_RAW += $TABLE_ROWS
+    $CONFLUENCE_STORAGE_RAW += $CONFLUENCE_STORAGE_RAW_FOOTER
+    Write-Debug '##########################################################'
+    Write-Debug 'Confluence Storage Raw: '
+    Write-Debug $CONFLUENCE_STORAGE_RAW
+    Write-Debug '##########################################################'
+    return $true
 }
 
 function Get-JiraIssueChangeNullsFromJQL {
@@ -263,21 +317,19 @@ function Get-JSONFieldsWithData {
     Write-Debug "Fields with data written to: $((Get-Item -Path $OUTPUT_FILE).Directory.FullName)"
 }
 
-function Get-JIRAFieldMap {
-    # Create a hash table of Jira fields with the field key as the key and the field name as the value
+function Get-JiraFieldMap {
     $JIRA_FIELDS = Get-JiraFields
     $JIRA_FIELD_MAPS = @{}
     $JIRA_FIELDS | ForEach-Object {
-        if (!$_.id -or !$_.name) {
-            Write-Debug "Field ID not found for field: $_.ToString"
+        if ($_.id -and $_.name) {
+            $JIRA_FIELD_MAPS[$_.id] = $_.name
         }
         else {
-            Write-Debug "Adding field to JIRA_FIELD_MAPS: $($_.id) - $($_.name)"
-            $JIRA_FIELD_MAPS[$_.name] = $_.id
+            Write-Debug "Field ID or name not found for field: $_.ToString()"
         }
     }
-    $JIRA_FIELD_MAP_JSON = $JIRA_FIELD_MAPS | ConvertTo-Json -Depth 10
-    return $JIRA_FIELD_MAP_JSON
+    Write-Debug "JIRA_FIELD_MAPS - FUNCTION: $($JIRA_FIELD_MAPS.GetType())"
+    return $JIRA_FIELD_MAPS
 }
 # Function to check if a Jira issue exists by key or ID
 function Test-JiraIssueExists {
@@ -417,11 +469,11 @@ function Get-JiraCloudJQLQueryResult {
     )
 
     $POST_BODY = @{
-        fieldsByKeys = $true
+        fieldsByKeys = $false
         jql          = "$JQL_STRING"
         maxResults   = 1
         startAt      = 0
-        fields       = @('name')
+        expand       = @('names')
     }
     # Get total number of results for the JQL query
     $WARNING_LIMIT = 2000
@@ -479,7 +531,7 @@ function Get-JiraCloudJQLQueryResult {
         $P_BODY_JSON = $POST_BODY | ConvertTo-Json
         Write-Debug "Getting Jira Cloud JQL Query Results Pages... P_BODY_JSON: $P_BODY_JSON, JSON_FILE_PATHNAME: $jsonFilePath"
         $jobs += Start-Job -ScriptBlock {
-            $ISSUES = Invoke-RestMethod -Uri "https://$($args[2])/rest/api/3/search?expand=names" -Headers $args[3] -Method Post -Body $args[0] -ContentType 'application/json'
+            $ISSUES = Invoke-RestMethod -Uri "https://$($args[2])/rest/api/3/search" -Headers $args[3] -Method Post -Body $args[0] -ContentType 'application/json'
             if ($ISSUES.statusCode -eq 429) {
                 Write-Debug 'API Rate Limit Exceeded. Waiting for 60 seconds...'
                 Start-Sleep -Seconds 20
@@ -514,8 +566,21 @@ function Get-JiraCloudJQLQueryResult {
     $jobs | Remove-Job
     # Make a combined JSON file of all the JSON data
     $COMBINED_JSON_FILE = "$($env:AtlassianPowerKit_PROFILE_NAME)\$($env:AtlassianPowerKit_PROFILE_NAME)-JQLExport-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-Results-Combined.json"
-    $ISSUES_LIST | ConvertTo-Json -Depth 30 | Out-File -FilePath $COMBINED_JSON_FILE
-    return $ISSUES_LIST
+    # If JIRA_FIELD_MAPS is defined, replace the field key with the field name in the JSON object
+    $ISSUE_LIST_JSON = $ISSUES_LIST | ConvertTo-Json -Depth 30
+    if ($JIRA_FIELD_MAPS) {
+        # Iterate through $JIRA_FIELD_MAPS and replace the field key with the field name in the JSON object
+        $JIRA_FIELD_MAPS.GetEnumerator() | ForEach-Object {
+            $FIELD_KEY = $_.Key
+            $FIELD_NAME = $_.Value
+            # Replace all instances of the field key with the field name in the JSON object
+            $ISSUE_LIST_JSON = $ISSUE_LIST_JSON -replace $FIELD_KEY, $FIELD_NAME
+        }
+    }
+    # Write the combined JSON file
+    $ISSUE_LIST_JSON | Out-File -FilePath $COMBINED_JSON_FILE
+    $OUPUT_FILE_PATH = $(Get-Item -Path $COMBINED_JSON_FILE).FullName
+    return $OUPUT_FILE_PATH
 }
 
 # Function to get change log for a Jira issue
@@ -826,7 +891,9 @@ function Get-JSMServices {
     }
     catch {
         Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
-        Write-Error "Error updating field: $($_.Exception.Message)"
+        # This functions name is $MyInvocation.MyCommand.Name
+        $ERROR_MESSAGE = "Error from $($MyInvocation.MyCommand.Name) - $($_.Exception.Message)"
+        Write-Error $ERROR_MESSAGE
     }
 }
 
@@ -847,7 +914,6 @@ function Get-JSMService {
         Write-Error "Error updating field: $($_.Exception.Message)"
     }
 }
-
 
 # Function to list Opsgenie services
 function Get-OpsgenieServices {

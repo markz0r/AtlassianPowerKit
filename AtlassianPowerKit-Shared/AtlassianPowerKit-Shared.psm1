@@ -175,25 +175,25 @@ function Update-AtlassianPowerKitVault {
 function Set-AtlassianPowerKitProfile {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$ProfileName
+        [string]$SelectedProfileName
     )
-    Write-Debug "Set-AtlassianPowerKitProfile - with: $ProfileName ..."
+    Write-Debug "Set-AtlassianPowerKitProfile - with: $SelectedProfileName ..."
     # Load all profiles from the secret vault
     if (!$(Get-SecretVault -Name $script:VAULT_NAME -ErrorAction SilentlyContinue)) {
         Register-AtlassianPowerKitVault
     }
     # Check if the profile exists
-    Get-AtlassianPowerKitProfileList
-    if (!$env:AtlassianPowerKit_PROFILE_LIST_STRING.Contains($ProfileName)) {
-        Write-Debug "Profile $ProfileName does not exists in the vault - we have: $env:AtlassianPowerKit_PROFILE_LIST_STRING"
+    $PROFILE_LIST = Get-AtlassianPowerKitProfileList
+    if (!$PROFILE_LIST.Contains($SelectedProfileName)) {
+        Write-Debug "Profile $SelectedProfileName does not exists in the vault - we have: $PROFILE_LIST"
         return $false
     }
     else {
-        Write-Debug "Profile $ProfileName exists in the vault, loading..."
+        Write-Debug "Profile $SelectedProfileName exists in the vault, loading..."
         try {
             # if vault is locked, unlock it
             Unlock-Vault -VaultName $script:VAULT_NAME
-            $PROFILE_DATA = (Get-Secret -Name $ProfileName -Vault $script:VAULT_NAME -AsPlainText)
+            $PROFILE_DATA = (Get-Secret -Name $SelectedProfileName -Vault $script:VAULT_NAME -AsPlainText)
             #Create environment variables for each item in the profile data
             $PROFILE_DATA.GetEnumerator() | ForEach-Object {
                 Write-Debug "Setting environment variable: $($_.Key) = $($_.Value)"
@@ -204,15 +204,15 @@ function Set-AtlassianPowerKitProfile {
             }
         } 
         catch {
-            Write-Debug "Failed to load profile $ProfileName. Please check the vault key file."
-            throw "Failed to load profile $ProfileName. Please check the vault key file."
+            Write-Debug "Failed to load profile $SelectedProfileName. Please check the vault key file."
+            throw "Failed to load profile $SelectedProfileName. Please check the vault key file."
         }
         Set-AtlassianAPIHeaders
-        Set-OpsgenieAPIHeaders
+        #Set-OpsgenieAPIHeaders
         $env:AtlassianPowerKit_CloudID = $(Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/_edge/tenant_info").cloudId
-        Write-Debug "Profile $ProfileName loaded successfully."
+        Write-Debug "Profile $SelectedProfileName loaded successfully."
     }
-    return $true
+    return $SelectedProfileName
 }
 
 function Register-AtlassianPowerKitVault {
@@ -278,11 +278,11 @@ function Register-AtlassianPowerKitVault {
 
 function Register-AtlassianPowerKitProfile {
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $ProfileName,
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [string] $AtlassianAPIEndpoint,
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $true)]
         [PSCredential] $AtlassianAPICredential,
         [Parameter(Mandatory = $false)]
         [string] $OpsgenieAPIEndpoint = 'api.opsgenie.com',
@@ -294,43 +294,63 @@ function Register-AtlassianPowerKitProfile {
     if (!$script:REGISTER_VAULT) {
         Register-AtlassianPowerKitVault
     }
+    # Function to write profile data to the vault
+    function Set-AtlassianPowerKitProfileData {
+        param (
+            [Parameter(Mandatory = $true)]
+            [string] $ProfileName,
+            [Parameter(Mandatory = $true)]
+            [hashtable] $ProfileData
+        )
+        Write-Debug "Writing profile data to vault for $ProfileName..."
+        Unlock-Vault -VaultName $script:VAULT_NAME
+        try {
+            Set-Secret -Name $ProfileName -Secret $ProfileData -Vault $script:VAULT_NAME
+        } 
+        catch {
+            Write-Debug "Update of vault failed for $ProfileName."
+            throw "Update of vault failed for $ProfileName."
+        }
+        Write-Debug "Vault entruy for $ProfileName updated successfully."
+    }
     # Check if the profile already exists in the secret vault
     if ($null -ne $env:AtlassianPowerKit_PROFILE_LIST_STRING -and $env:AtlassianPowerKit_PROFILE_LIST_STRING.Count -gt 0 -and $env:AtlassianPowerKit_PROFILE_LIST_STRING.Contains($ProfileName)) {
         Write-Debug "Profile $ProfileName already exists."
-        # Create a hashtable of the profile data to store in the secret vault
-        return $false
-    }
-    else {
-        #Write-Debug "Profile $ProfileName does not exist. Creating..."
-        Write-Debug "Preparing profile data for $ProfileName..."
-        $CredPair = "$($AtlassianAPICredential.UserName):$($AtlassianAPICredential.GetNetworkCredential().password)"
-        Write-Debug "CredPair: $CredPair"
-        $AtlassianAPIAuthToken = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($CredPair))
-        $ProfileData = @{
-            'PROFILE_NAME'           = $ProfileName
-            'AtlassianAPIEndpoint'   = $AtlassianAPIEndpoint
-            'AtlassianAPIUserName'   = $AtlassianAPICredential.UserName
-            'AtlassianAPIAuthString' = $AtlassianAPIAuthToken
-            'OpsgenieAPIEndpoint'    = $OpsgenieAPIEndpoint
+        # Ask user if they want to overwrite the profile
+        $overwrite = Read-Host -Prompt "Profile $ProfileName already exists. Do you want to overwrite it? (Y/N)"
+        if ($overwrite -eq 'Y') {
+            Write-Debug "Overwriting profile $ProfileName..."
         }
-        if ($UseOpsgenieAPI) {
-            $OpsgenieAPICredential = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($OpsgenieAPICredential.GetNetworkCredential().password))
-            $ProfileData.Add('OpsgenieAPIAuthString', $OpsgenieAPICredential)
+        else {
+            Write-Debug "Profile $ProfileName already exists."
+            return $false
         }
-        Write-Debug "Creating profile $ProfileName in $script:VAULT_NAME..."
-        Set-Secret -Name $ProfileName -Secret $ProfileData -Vault $script:VAULT_NAME
     }
+    #Write-Debug "Profile $ProfileName does not exist. Creating..."
+    Write-Debug "Preparing profile data for $ProfileName..."
+    $CredPair = "$($AtlassianAPICredential.UserName):$($AtlassianAPICredential.GetNetworkCredential().password)"
+    Write-Debug "CredPair: $CredPair"
+    $AtlassianAPIAuthToken = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($CredPair))
+    $ProfileData = @{
+        'PROFILE_NAME'           = $ProfileName
+        'AtlassianAPIEndpoint'   = $AtlassianAPIEndpoint
+        'AtlassianAPIUserName'   = $AtlassianAPICredential.UserName
+        'AtlassianAPIAuthString' = $AtlassianAPIAuthToken
+    }
+    Write-Debug "Creating profile $ProfileName in $script:VAULT_NAME..."
+    Set-Secret -Name $ProfileName -Secret $ProfileData -Vault $script:VAULT_NAME
     Write-Debug "Profile $ProfileName created successfully in $script:VAULT_NAME."
     Write-Debug 'Clearing existing profiles selection...'
     Clear-AtlassianPowerKitProfile
-    Set-AtlassianPowerKitProfile -ProfileName $ProfileName
+    $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $ProfileName
+    return $LOADED_PROFILE
 }
 
 function Clear-AtlassianPowerKitProfile {
     # Clear all environment variables starting with AtlassianPowerKit_
     Get-ChildItem env:AtlassianPowerKit_* | ForEach-Object {
         Write-Debug "Removing environment variable: $_"
-        rm "env:$($_.Name)" -ErrorAction Continue
+        Remove-Item "env:$($_.Name)" -ErrorAction Continue
     }
 }
 
@@ -380,6 +400,18 @@ function Clear-AtlassianPowerKitVault {
     Clear-AtlassianPowerKitProfile
 }
 
+# Function to check if a profile is already loaded
+function Get-CurrentAtlassianPowerKitProfile {
+    if ($env:AtlassianPowerKit_PROFILE_NAME) {
+        #Write-Debug "Profile $($env:AtlassianPowerKit_PROFILE_NAME) is loaded."
+        return $env:AtlassianPowerKit_PROFILE_NAME
+    }
+    else {
+        Write-Debug 'No profile loaded.'
+        return $false
+    }
+}
+
 function Get-AtlassianPowerKitProfileList {
     Write-Debug 'Getting AtlassianPowerKit Profile List...'
     if (!$(Get-SecretVault -Name $script:VAULT_NAME -ErrorAction SilentlyContinue)) {
@@ -396,4 +428,5 @@ function Get-AtlassianPowerKitProfileList {
     }
     $env:AtlassianPowerKit_PROFILE_LIST_STRING = $PROFILE_LIST
     Write-Debug "Profiles found: $($env:AtlassianPowerKit_PROFILE_LIST_STRING)"
+    return $PROFILE_LIST
 }
