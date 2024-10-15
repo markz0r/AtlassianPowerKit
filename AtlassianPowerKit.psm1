@@ -50,6 +50,13 @@ function Invoke-AtlassianPowerKitFunction {
         [hashtable] $FunctionParameters
     )
     Import-NestedModules
+    if ($FunctionParameters) {
+        Write-Debug "Setting Input Parameters: $FunctionParameters"
+        $INPUT_PARAMETERS = $FunctionParameters
+    }
+    else {
+        Write-Debug 'No input parameters provided.'
+    }
     if ($Profile) {
         if (!(Get-CurrentAtlassianPowerKitProfile)) {
             $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $Profile
@@ -71,7 +78,12 @@ function Invoke-AtlassianPowerKitFunction {
     
     # Splattting the parameters to the function
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    Invoke-Expression "$FunctionName @FunctionParameters"
+    if ($INPUT_PARAMETERS) {
+        Invoke-Expression "$FunctionName @INPUT_PARAMETERS"
+    }
+    else {
+        Invoke-Expression "$FunctionName"
+    }
     $stopwatch.Stop()
     Write-Output "Function $FunctionName completed - execution time: $($stopwatch.Elapsed.TotalSeconds) seconds"
 }
@@ -316,7 +328,7 @@ function AtlassianPowerKit {
             }
         } 
         $InputProfileName = $Profile.Trim().ToLower()
-        $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $InputProfileName
+        $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $InputProfileName -Force
         #Write-Debug "Setting provided profile: $ProfileName"
         #Set-AtlassianPowerKitProfile $ProfileName
         if ($LOADED_PROFILE -ne $InputProfileName) {

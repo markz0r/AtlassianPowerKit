@@ -100,7 +100,7 @@ function Get-JiraFilterResultsAsConfluenceTable {
 
     $FILTER_COLUMNS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/filter/$($FILTER_ID)/columns" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
     $COLUMN_VALS = $FILTER_COLUMNS.value
-    $JIRA_ISSUES_JSON_FILE_PATH = Get-JiraCloudJQLQueryResult -JQL_STRING $FILTER_INFO.jql -RETURN_FIELDS $COLUMN_VALS -JIRA_FIELD_MAPS $(Get-JIRAFieldMap)
+    $JIRA_ISSUES_JSON_FILE_PATH = Get-JiraCloudJQLQueryResult -JQL_STRING $FILTER_INFO.jql -RETURN_FIELDS $COLUMN_VALS
     #$JIRA_ISSUES_RETURN = $JIRA_ISSUES_RAW | ConvertTo-Json | ConvertFrom-Json -Depth 30
     # Read the JSON file
     $jsonContent = $(Get-Content -Path $JIRA_ISSUES_JSON_FILE_PATH -Raw | ConvertFrom-Json)
@@ -356,36 +356,6 @@ function Test-JiraIssueExists {
     }
 }
 
-# Function to Export all Get-JiraCloudJQLQueryResult to a JSON file
-function Export-JiraCloudJQLQueryResultsToJSON {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$JQL_STRING,
-        [Parameter(Mandatory = $false)]
-        [string]$JSON_FILE_PATH
-    )
-    
-    Write-Debug 'Getting JIRA_FIELD_MAPS hash table...'
-    $JIRA_FIELD_MAPS = Get-JIRAFieldMap
-
-    # Get the JQL query results and provide the JSON file path if it is defined
-    Write-Debug 'Exporting JQL query results to JSON'
-    # Advise the user if the JSON file path is not defined so only the results are displayed
-    if (-not $JSON_FILE_PATH) {
-        $JSON_FILE_PATH = "$($env:AtlassianPowerKit_PROFILE_NAME)-JQLExport-$((Get-Date).ToString('yyyyMMdd-HHmmss'))"
-        Write-Debug "JSON file path not defined. creating JSON output dir current directory in $JSON_FILE_PATH"
-        # create the directory if it does not exist
-        if (-not (Test-Path $JSON_FILE_PATH)) {
-            New-Item -ItemType Directory -Path $JSON_FILE_PATH
-        }
-    }
-    Write-Debug "JQL Query: $JQL_STRING running..."
-    # wait for Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -JSON_FILE_PATH $JSON_FILE_PATH to complete and return the results to $REST_RESULTS
-    $REST_RESULTS = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -JIRA_FIELD_MAPS $JIRA_FIELD_MAPS
-    Write-Debug "Total Results: $($REST_RESULTS.total), export complete."
-    return $REST_RESULTS
-}
-
 # Function to get JSON object for a Jira issue
 function Get-JiraIssue {
     param (
@@ -420,9 +390,7 @@ function Get-JiraCloudJQLQueryResultPages {
         [Parameter(Mandatory = $true)]
         [string]$P_BODY_JSON,
         [Parameter(Mandatory = $false)]
-        [string]$JSON_FILE_PATHNAME,
-        [Parameter(Mandatory = $false)]
-        [System.Object]$JIRA_FIELD_MAPS
+        [string]$JSON_FILE_PATHNAME
     )
     $ISSUES = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body $P_BODY_JSON -ContentType 'application/json'
     # Backoff if the API returns a 429 status code
@@ -432,36 +400,6 @@ function Get-JiraCloudJQLQueryResultPages {
         continue
     }
     Write-Debug "Total: $($ISSUES.total) - Collecting issues: $($P_BODY.startAt) to $($P_BODY.startAt + 100)..."
-    if ($ISSUES.issues -and $JSON_FILE_PATHNAME) {
-        Write-Debug "Exporting $P_BODY.startAt plus $P_BODY.maxResults to $JSON_FILE_PATHNAME"
-        # Replace the field key with the field name in the JSON object
-        function Convert-FieldKeyToName {
-            param (
-                [Parameter(Mandatory = $true)]
-                [System.Object]$FIELD_OBJECT,
-                [Parameter(Mandatory = $true)]
-                [System.Object]$JIRA_FIELD_MAPS
-            )
-            $OUT_KEY = $FIELD_OBJECT.Key
-            if ($JIRA_FIELD_MAPS.ContainsKey($FIELD_KEY)) {
-                $OUT_KEY = $JIRA_FIELD_MAPS[$FIELD_KEY]
-            }
-            return @{ $OUT_KEY = $FIELD_OBJECT.Value }
-        }
-        $ISSUES.issues | ForEach-Object {
-            $ISSUE = $_
-            $ISSUE.fields | ForEach-Object {
-                $FIELD_KEY = $_.Key
-                if ($JIRA_FIELD_MAPS.ContainsKey($FIELD_KEY)) {
-                    $_.FieldName = $JIRA_FIELD_MAPS[$FIELD_KEY]
-                }
-            }
-        }
-        $ISSUE = $($ISSUES.issues | Select-Object -Property key, fields)
-        # Write the issue object to terminal displaying all fields
-        #$ISSUE_JSON = $ISSUES.issues | Select-Object -Property key, fields | ConvertTo-Json -Depth 30
-
-    }
     #Out-File -FilePath "$JSON_FILE_PATHNAME"
     $ISSUES
 }
@@ -473,11 +411,9 @@ function Get-JiraCloudJQLQueryResult {
         [Parameter(Mandatory = $true)]
         [string]$JQL_STRING,
         [Parameter(Mandatory = $false)]
-        [System.Object]$JIRA_FIELD_MAPS,
-        [Parameter(Mandatory = $false)]
         [string[]]$RETURN_FIELDS
     )
-
+    $JIRA_FIELD_MAPS = Get-JIRAFieldMap
     $POST_BODY = @{
         fieldsByKeys = $false
         jql          = "$JQL_STRING"
@@ -517,12 +453,7 @@ function Get-JiraCloudJQLQueryResult {
     else {
         $POST_BODY.fields = @('*all', '-attachments', '-comment', '-issuelinks', '-subtasks', '-worklog')
     }
-    # If json file path is defined, create a prefix for the file name and create the file path if it does not exist
-    $JSON_FILE_PREFIX = "$($env:AtlassianPowerKit_PROFILE_NAME)\$($env:AtlassianPowerKit_PROFILE_NAME)-JQLExport-$((Get-Date).ToString('yyyyMMdd-HHmmss'))\$($env:AtlassianPowerKit_PROFILE_NAME)-JQLExport-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-Results-"
 
-    if (-not (Test-Path $JSON_FILE_PREFIX)) {
-        New-Item -ItemType Directory -Path $JSON_FILE_PREFIX
-    }
     $STARTAT = 0; $ISSUES_LIST = @(); $jobs = @(); $maxConcurrentJobs = 100
     while ($STARTAT -lt $VALIDATE_QUERY.total) {
         # If the number of running jobs is equal to the maximum, wait for one to complete
@@ -537,28 +468,28 @@ function Get-JiraCloudJQLQueryResult {
             $jobs = $jobs | Where-Object { $_.Id -ne $completedJob.Id }
         }
         $POST_BODY.startAt = $STARTAT
-        $jsonFilePath = "$JSON_FILE_PREFIX-$STARTAT.json"
+        $jsonFilePath = "Get-JiraCloudJQLQueryResult-$STARTAT.json"
         $P_BODY_JSON = $POST_BODY | ConvertTo-Json
         Write-Debug "Getting Jira Cloud JQL Query Results Pages... P_BODY_JSON: $P_BODY_JSON, JSON_FILE_PATHNAME: $jsonFilePath"
         $jobs += Start-Job -ScriptBlock {
-            $ISSUES = Invoke-RestMethod -Uri "https://$($args[2])/rest/api/3/search" -Headers $args[3] -Method Post -Body $args[0] -ContentType 'application/json'
+            $ISSUES = Invoke-RestMethod -Uri "https://$($args[1])/rest/api/3/search" -Headers $args[2] -Method Post -Body $args[0] -ContentType 'application/json'
             if ($ISSUES.statusCode -eq 429) {
                 Write-Debug 'API Rate Limit Exceeded. Waiting for 60 seconds...'
                 Start-Sleep -Seconds 20
                 continue
             }
             Write-Debug "Total: $($ISSUES.total) - Collecting issues: $($args[0].startAt) to $($args[0].startAt + 100)..."
-            if ($ISSUES.issues -and $args[1]) {
-                Write-Debug "Exporting $($args[0].startAt) plus $($args[0].maxResults) to $($args[1])"
-                $ISSUES.issues | Select-Object -Property key, fields | ConvertTo-Json -Depth 30 | Out-File -FilePath $args[1]
-                # Check file was written
-                if (-not (Test-Path $args[1])) {
-                    Write-Error "File not written: $($args[1])"
-                }
-            }
+            # if ($ISSUES.issues -and $args[1]) {
+            #     Write-Debug "Exporting $($args[0].startAt) plus $($args[0].maxResults) to $($args[1])"
+            #     $ISSUES.issues | Select-Object -Property key, fields | ConvertTo-Json -Depth 30 | Out-File -FilePath $args[1]
+            #     # Check file was written
+            #     if (-not (Test-Path $args[1])) {
+            #         Write-Error "File not written: $($args[1])"
+            #     }
+            # }
             # Get-JiraCloudJQLQueryResultPages -P_BODY_JSON $args[0] -JSON_FILE_PATHNAME $args[1]
             $ISSUES
-        } -ArgumentList @($P_BODY_JSON, $jsonFilePath, $($env:AtlassianPowerKit_AtlassianAPIEndpoint), $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders))
+        } -ArgumentList @($P_BODY_JSON, $($env:AtlassianPowerKit_AtlassianAPIEndpoint), $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders), $jsonFilePath)
         Write-Debug 'Sleeping for 2 seconds before next iteration...'
         Start-Sleep -Seconds 2
         $STARTAT += 100
@@ -589,8 +520,8 @@ function Get-JiraCloudJQLQueryResult {
     }
     # Write the combined JSON file
     $ISSUE_LIST_JSON | Out-File -FilePath $COMBINED_JSON_FILE
-    $OUPUT_FILE_PATH = $(Get-Item -Path $COMBINED_JSON_FILE).FullName
-    return $OUPUT_FILE_PATH
+    $OUTPUT_FILE_PATH = $(Get-Item -Path $COMBINED_JSON_FILE).FullName
+    return $OUTPUT_FILE_PATH
 }
 
 # Function to get change log for a Jira issue
@@ -704,10 +635,6 @@ function Set-JiraIssueField {
         [Parameter(Mandatory = $false)]
         [string]$FieldType = 'text'
     )
-    if ($Field_Ref -eq 'customfield_10181') {
-        Write-Debug 'Overiding known field ID change for Service Categories to customfield_10316...'
-        $Field_Ref = 'customfield_10316'
-    }
     $FIELD_PAYLOAD = @{}
     function Set-MutliSelectPayload {
         @{
@@ -751,28 +678,16 @@ function Set-JiraIssueFieldForJQLQueryResults {
         [Parameter(Mandatory = $true)]
         [string]$JQL_STRING,
         [Parameter(Mandatory = $true)]
-        [string]$Field_Ref,
-        [Parameter(Mandatory = $true)]
-        [string]$New_Value,
-        [Parameter(Mandatory = $false)]
-        [string]$FieldType = 'text'
+        [string]$JSON_TEMPLATE_FILE
     )
     $ISSUES = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING
     $ISSUES.issues | ForEach-Object {
         $ISSUE = $_
         $ISSUE_KEY = $ISSUE.key
         $ISSUE_SUMMARY = $ISSUE.fields.summary
-        Write-Debug "Setting field for issue: $($_.key - $ISSUE_SUMMARY)"
-        $NEW_ISSUE_VALUE = ''
-        if ($New_Value -eq 'CUSTOM_FUNCTION') {
-            #$NEW_ISSUE_VALUE = '[' + $ISSUE_KEY + ': ' + $ISSUE_SUMMARY + '|https://' + $env:AtlassianPowerKit_AtlassianAPIEndpoint + '/servicedesk/customer/portal/7/' + $ISSUE_KEY + ']'
-            $NEW_ISSUE_VALUE = '[GRCOSM-767: ISMF Meeting - 20240404|https://cpksystems.atlassian.net/browse/GRCOSM-767]'
-            Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref 'customfield_10132' -New_Value $NEW_ISSUE_VALUE -FieldType $FieldType
-        }
-        else {
-            $NEW_ISSUE_VALUE = $New_Value
-            Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref $Field_Ref -New_Value $NEW_ISSUE_VALUE -FieldType $FieldType
-        }
+        Write-Debug "Updating fields for issue: $($_.key - $ISSUE_SUMMARY)"
+        $NEW_ISSUE_VALUE = $New_Value
+        Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref $Field_Ref -New_Value $NEW_ISSUE_VALUE -FieldType $FieldType
     }
 }
 
@@ -845,13 +760,13 @@ function Get-JiraIssueChangeNulls {
 function Get-JiraFields {
     param (
         [Parameter(Mandatory = $false)]
-        [switch]$SUPRESS_OUTPUT = $false
+        [switch]$WriteOutput = $false
     )
     $REST_RESULTS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/field" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
     #Write-Debug $REST_RESULTS.getType()
     #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
     # Write a file with the results to $env:AtlantisPowerKit_PROFILE_NAME-JIRAFields-YYYYMMDD-HHMMSS.json
-    if (-not $SUPRESS_OUTPUT) {
+    if ($WriteOutput) {
         $OUTPUT_FILE = "$env:AtlassianPowerKit_PROFILE_NAME\$env:AtlassianPowerKit_PROFILE_NAME-JIRAFields-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
         if (-not (Test-Path $OUTPUT_FILE)) {
             New-Item -ItemType File -Path $OUTPUT_FILE
@@ -860,34 +775,6 @@ function Get-JiraFields {
         Write-Debug "Jira Fields written to: $OUTPUT_FILE"
     }
     return $REST_RESULTS
-}
-
-# Function to create a custom field in Jira Cloud
-# https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-fields/#api-rest-api-3-field-post
-# Type for OSMEntity is "com.atlassian.jira.plugin.system.customfieldtypes:cascadingselectsearcher"
-# # cascadingselectsearcher
-function Set-JiraCustomField {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$FIELD_NAME,
-        [Parameter(Mandatory = $true)]
-        [string]$FIELD_TYPE
-    )
-    $CUSTOM_FIELD_PAYLOAD = @{
-        name          = "$FIELD_NAME"
-        type          = "$FIELD_TYPE"
-        searcherKey   = "com.atlassian.jira.plugin.system.customfieldtypes:$FIELD_TYPE"
-        'description' = "OSM custom field for: $FIELD_NAME - support@osm.dev"
-    }
-    try {
-        $REST_RESULTS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/field/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body ($CUSTOM_FIELD_PAYLOAD | ConvertTo-Json) -ContentType 'application/json'
-        Write-Debug $REST_RESULTS.getType()
-        Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
-    }
-    catch {
-        Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
-        Write-Error "Error updating field: $($_.Exception.Message)"
-    }
 }
 
 # Function to list all users for a JSM cloud project

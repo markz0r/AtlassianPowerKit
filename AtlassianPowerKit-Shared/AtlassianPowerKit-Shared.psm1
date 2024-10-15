@@ -175,7 +175,9 @@ function Update-AtlassianPowerKitVault {
 function Set-AtlassianPowerKitProfile {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$SelectedProfileName
+        [string]$SelectedProfileName,
+        [Parameter(Mandatory = $false)]
+        [switch]$Force = $false
     )
     Write-Debug "Set-AtlassianPowerKitProfile - with: $SelectedProfileName ..."
     # Load all profiles from the secret vault
@@ -430,4 +432,37 @@ function Get-AtlassianPowerKitProfileList {
     $env:AtlassianPowerKit_PROFILE_LIST_STRING = $PROFILE_LIST
     Write-Debug "Profiles found: $($env:AtlassianPowerKit_PROFILE_LIST_STRING)"
     return $PROFILE_LIST
+}
+
+# Function Update-ContentPlaceholderAll, takes a file path and a hashtable of placeholders and values, returning the content with the placeholders replaced (not updating the file)
+function Get-PopulatedTemplate {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$TemplateFilePath,
+        [Parameter(Mandatory = $false)]
+        [string[]]$InputJSON,
+        [Parameter(Mandatory = $false)]
+        [string[]]$InputConfStorageString
+    )
+    # If neither JSON or ConfStorageString is provided error
+    if (-not $InputJSON -and -not $InputConfStorageString) {
+        Write-Debug 'No InputJSON or InputConfStorageString provided to , one is required. Exiting...'
+        Write-Error 'Get-PopulatedTemplate failed. Exiting...'
+        return $false
+    }
+    $TemplateContent = Get-Content -Path $TemplateFilePath -Raw | ConvertFrom-Json -Depth 20
+    foreach ($item in $TemplateContent.placeholderMap) {
+        foreach ($key in $item.Keys) {
+            $value = $item[$key]
+            $valueDataType = $value.GetType().Name
+
+            # Handle different types of values
+            if ($value -is [System.Collections.IEnumerable] -and -not ($value -is [string])) {
+                $value = $value -join ', '
+            }
+
+            Write-Host "Key: $key, ValueDataType: $valueDataType, Value: $value"
+        }
+    }
+    return $Content
 }

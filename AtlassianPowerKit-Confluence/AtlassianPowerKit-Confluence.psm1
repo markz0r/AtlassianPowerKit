@@ -327,16 +327,8 @@ function Remove-AttachmentsFromConfPage {
         }
         else {
             $CONFLUENCE_PAGE_ATTACHMENT_DELETE_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/wiki/api/v2/attachments/$($_.id)"
-            try {
-                Write-Debug "Deleting attachment: $($_.title)"
-                Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ATTACHMENT_DELETE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Delete
-                Write-Debug $REST_RESULTS.getType()
-                Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
-            }
-            catch {
-                Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
-                Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
-            }
+            Write-Debug "Deleting attachment: $($_.title)"
+            Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ATTACHMENT_DELETE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Delete
         }
     }
 }
