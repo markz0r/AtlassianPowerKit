@@ -1,14 +1,23 @@
 # Powershell function that validates a file adheres to https://confluence.atlassian.com/doc/confluence-storage-format-790796544.html
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-function Test-ConfluenceStorageFormat {
+function Compress-ConfluenceStorageFormat {
     param (
         [Parameter(Mandatory = $true)]
         [string]$FilePath
     )
     # Define the replacement map
     $PARSE_REPLACEMENT_MAP = @{
-        '&mdash;' = '&#8212;'
-        '&rsquo;' = '&#8217;'
+        '&mdash;'  = '&#8212;'
+        '&rsquo;'  = '&#8217;'
+        '&lsquo;'  = '&#8216;'
+        '&ldquo;'  = '&#8220;'
+        '&rdquo;'  = '&#8221;'
+        '&ndash;'  = '&#8211;'
+        '&hellip;' = '&#8230;'
+        '&amp;'    = '&'
+        '&lt;'     = '<'
+        '&gt;'     = '>'
+        '&quot;'   = '"'
         # Add more replacements as needed
     }
 
@@ -22,49 +31,34 @@ function Test-ConfluenceStorageFormat {
         # Add known prefixes to the namespace manager
         $namespaceManager = New-Object System.Xml.XmlNamespaceManager($xmlContent.NameTable)
         foreach ($prefix in $prefixes) {
-            $namespaceManager.AddNamespace($prefix, 'http://zoak.solutions/schema/confluence/1.0/')
+            $namespaceManager.AddNamespace($prefix, $nameSpaceName)
         }
         $xml = Get-Content -Path $FilePath -Raw
         # Apply replacements from the map
         foreach ($key in $PARSE_REPLACEMENT_MAP.Keys) {
-            $xml = $xml -replace $key, $PARSE_REPLACEMENT_MAP[$key]
+            $xml = $xml -replace [regex]::Escape($key), $PARSE_REPLACEMENT_MAP[$key]
         }
         # Dynamically construct namespace declarations
-        $namespaceDeclarations = $prefixes -join "='$nameSpaceName' xmlns:" | ForEach-Object { "xmlns:$_='$nameSpaceName'" }
+        $namespaceDeclarations = $prefixes | ForEach-Object { "xmlns:$_='$nameSpaceName'" } -join ' '
 
         # Construct the XML string with dynamic namespaces
         $xml = "<root $namespaceDeclarations>$xml</root>"
-        Write-Debug "XML: $xml"
+        Write-Debug "XML before compression: $xml"
         $xmlContent.LoadXml($xml)
+
+        # Remove unnecessary whitespace, carriage returns, and line breaks
+        $compressedXml = $xmlContent.OuterXml -replace '\s+', ' ' -replace '>\s+<', '><'
+
+        Write-Debug "Compressed XML: $compressedXml"
+
+        # Save the compressed XML content
+        $compressedFilePath = [System.IO.Path]::ChangeExtension($FilePath, '.compressed.xml')
+        [System.IO.File]::WriteAllText($compressedFilePath, $compressedXml)
     }
     catch {
-        Write-Host "Failed to load XML content: $_"
+        Write-Host "Failed to load or compress XML content: $_"
         return
     }
 
-    # Check for common root elements in Confluence Storage Format
-    $requiredElements = @('ac:layout')
-    $expectedElements = @('ac:structured-macro', 'ac:parameter', 'ac:rich-text-body', 'ri:attachment', 'ri:page')
-
-    $isValid = $true
-
-    foreach ($element in $requiredElements) {
-        if (-not $xmlContent.OuterXml.Contains($element)) {
-            Write-Warning "ERROR: Required element not found: $element"
-            #$isValid = $false
-        }
-    }
-
-    foreach ($element in $expectedElements) {
-        if (-not $xmlContent.OuterXml.Contains($element)) {
-            Write-Debug "INFO: Comment element not found: $element"
-        }
-    }
-
-    if ($isValid) {
-        Write-Debug "Success - $FilePath adheres to the basic structure of the Confluence Storage Format."
-    }
-    else {
-        Write-Error "$FilePath does not adhe to the basic structure of the Confluence Storage Format."    
-    }
+    Write-Debug "Success - Compressed XML content saved to $compressedFilePath"
 }

@@ -42,7 +42,7 @@ function Get-VaultKey {
         Write-Debug 'No vault key file found. Please register a vault first.'
         return $false
     }
-    $VAULT_KEY = Import-CliXml -Path $VAULT_KEY_PATH
+    $VAULT_KEY = Import-Clixml -Path $VAULT_KEY_PATH
     return $VAULT_KEY
 }
 
@@ -62,7 +62,7 @@ function Unlock-Vault {
     }
     catch {
         # If an error is thrown, the vault is locked.
-        write-debug "Unlock-Vault failed: $_ ..."
+        Write-Debug "Unlock-Vault failed: $_ ..."
         throw 'Unlock-Vault failed Exiting'
     }
     # If no error is thrown, the vault is unlocked.
@@ -105,30 +105,30 @@ function Test-AtlassianPowerKitProfile {
 }
 
 # Funtion to set the Opsgenie API endpoint and headers
-function Set-OpsgenieAPIHeaders {
-    # check if there is a profile loaded
-    if (!$env:AtlassianPowerKit_PROFILE_NAME) {
-        Write-Debug 'No profile loaded. Please load a profile first.'
-        return $false
-    }
-    elseif (-not $env:AtlassianPowerKit_UseOpsgenieAPI) {
-        Write-Debug 'Profile does not use Opsgenie API, setting defaults'
-        $HEADERS = @{
-            Authorization = "Basic $($env:AtlassianPowerKit_AtlassianAPIAuthString)"
-            Accept        = 'application/json'
-        }
-    }
-    else {
-        $HEADERS = @{
-            Authorization = "Basic $($env:AtlassianPowerKit_OpsgenieAPIAuthString)"
-            Accept        = 'application/json'
-        }
-    }
-    $env:AtlassianPowerKit_OpsgenieAPIHeaders = $HEADERS | ConvertTo-Json
-    Write-Debug "Opsgenie headers set for $($env:AtlassianPowerKit_PROFILE_NAME)."
-    Write-Debug "Headers are: $($env:AtlassianPowerKit_OpsgenieAPIHeaders)"
-    Write-Debug "Opsgenie Profile Loaded for: $($env:AtlassianPowerKit_PROFILE_NAME)"
-}
+# function Set-OpsgenieAPIHeaders {
+#     # check if there is a profile loaded
+#     if (!$env:AtlassianPowerKit_PROFILE_NAME) {
+#         Write-Debug 'No profile loaded. Please load a profile first.'
+#         return $false
+#     }
+#     elseif (-not $env:AtlassianPowerKit_UseOpsgenieAPI) {
+#         Write-Debug 'Profile does not use Opsgenie API, setting defaults'
+#         $HEADERS = @{
+#             Authorization = "Basic $($env:AtlassianPowerKit_AtlassianAPIAuthString)"
+#             Accept        = 'application/json'
+#         }
+#     }
+#     else {
+#         $HEADERS = @{
+#             Authorization = "Basic $($env:AtlassianPowerKit_OpsgenieAPIAuthString)"
+#             Accept        = 'application/json'
+#         }
+#     }
+#     $env:AtlassianPowerKit_OpsgenieAPIHeaders = $HEADERS | ConvertTo-Json
+#     Write-Debug "Opsgenie headers set for $($env:AtlassianPowerKit_PROFILE_NAME)."
+#     Write-Debug "Headers are: $($env:AtlassianPowerKit_OpsgenieAPIHeaders)"
+#     Write-Debug "Opsgenie Profile Loaded for: $($env:AtlassianPowerKit_PROFILE_NAME)"
+# }
 
 # Function to set the Atlassian Cloud API headers
 function Set-AtlassianAPIHeaders {
@@ -175,9 +175,7 @@ function Update-AtlassianPowerKitVault {
 function Set-AtlassianPowerKitProfile {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$SelectedProfileName,
-        [Parameter(Mandatory = $false)]
-        [switch]$Force = $false
+        [string]$SelectedProfileName
     )
     Write-Debug "Set-AtlassianPowerKitProfile - with: $SelectedProfileName ..."
     # Load all profiles from the secret vault
@@ -201,7 +199,7 @@ function Set-AtlassianPowerKitProfile {
                 Write-Debug "Setting environment variable: $($_.Key) = $($_.Value)"
                 # Create environment variable concatenated with AtlassianPowerKit_ prefix
                 $SetEnvar = '$env:AtlassianPowerKit_' + $_.Key + " = `"$($_.Value)`""
-                Invoke-Expression -Command $SetEnvar
+                Invoke-Expression -Command $SetEnvar | Out-Null
                 Write-Debug "Environment variable set: $SetEnvar"
             }
         } 

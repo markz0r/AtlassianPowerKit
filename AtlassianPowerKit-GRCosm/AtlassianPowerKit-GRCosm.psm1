@@ -7,9 +7,6 @@ $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 GitHub: https://github.com/markz0r/AtlassianPowerKit
 
 #>
-
-
-# Create class for FILE_INFO_ARRAY
 class ConfluenceMetadataObject {
     [string] $FILE_NAME
     [string] $VIEW_URL
@@ -77,11 +74,15 @@ function Update-GRCosmConfRegister {
         [Parameter(Mandatory = $true)]
         [string]$FILTER_ID,
         [Parameter(Mandatory = $true)]
-        [string]$REGISTER_STORAGE_TEMPLATE_PATH
+        [string]$REGISTER_STORAGE_TEMPLATE_PATH,
+        [Parameter(Mandatory = $false)]
+        [string]$TEMPLATE_PLACEHOLDER_MAP
     )
-    # Ensure the AtlasianPowerKit-GRCosm dependencies are installed
-    
-
+    if (-not $TEMPLATE_PLACEHOLDER_MAP) {
+        $TEMPLATE_PLACEHOLDER_MAP = @{
+            'GRCOSM_REGISTER_TABLE_DATA' = 'Get-JiraFilterResultsAsConfluenceTable -FILTER_ID $FILTER_ID'
+        }
+    }
     # Check template file exists
     if (-not (Test-Path $REGISTER_STORAGE_TEMPLATE_PATH)) {
         Write-Error "Update-GRCosmConfRegister: Template file not found: $REGISTER_STORAGE_TEMPLATE_PATH"
@@ -90,157 +91,37 @@ function Update-GRCosmConfRegister {
     $BACKUP_FILE = Export-ConfluencePageStorageFormat -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_ID $CONF_PAGE_ID
     Write-Debug "Backup file: $BACKUP_FILE"
 
+    # Split $BACKUP_FILE on _ and drop the last element
+    $BACKUP_FILE_BASE = $($BACKUP_FILE -split '_2')[0]
+
     # Get JIRA filter data - Fields are determined by the JIRA filter
+    # Write-Debug '############################################################################################'
+    Write-Debug 'Update-GRCosmConfRegister: Getting JIRA filter results as Confluence table...'
     $CONF_REGISTER_TABLE_DATA = Get-JiraFilterResultsAsConfluenceTable -FILTER_ID $FILTER_ID
-    $UPDATED_PAGE_STORAGE_DATA = Get-Content $REGISTER_STORAGE_TEMPLATE_PATH
-    # Replate 'GRCOSM_REGISTER_TABLE_DATA' with $CONF_REGISTER_TABLE_DATA
-    $UPDATED_PAGE_STORAGE_DATA = $UPDATED_PAGE_STORAGE_DATA -replace 'GRCOSM_REGISTER_TABLE_DATA', $CONF_REGISTER_TABLE_DATA
+    Write-Debug 'Update-GRCosmConfRegister: Jira filter results as Confluence table returned'
+    # Write-Debug "Type: $($CONF_REGISTER_TABLE_DATA.GetType())"
+    # Write-Debug "Length: $($CONF_REGISTER_TABLE_DATA.Length)"
+    # Write-Debug "Content: `n $($CONF_REGISTER_TABLE_DATA)"
+    Write-Debug 'Update-GRCosmConfRegister: Getting Confluence template data...'
+    # ([string]::join("",$CONTENT.Split("`n").Trim()))
+    $UPDATED_PAGE_STORAGE_DATA = Get-Content $REGISTER_STORAGE_TEMPLATE_PATH -Raw
+    Write-Debug 'Update-GRCosmConfRegister: Confluence template data returned'
+    # Write-Debug "Type: $($UPDATED_PAGE_STORAGE_DATA.GetType())"
+    # Write-Debug "Length: $($UPDATED_PAGE_STORAGE_DATA.Length)"
+    # Write-Debug "Content: `n $($UPDATED_PAGE_STORAGE_DATA)"
+    Write-Debug 'Update-GRCosmConfRegister: Replacing GRCOSM_REGISTER_TABLE_DATA PLA with JIRA filter results...'
+    $UPDATED_PAGE_STORAGE_DATA = $UPDATED_PAGE_STORAGE_DATA -replace 'GRCOSM_REGISTER_TABLE_DATA', $CONF_REGISTER_TABLE_DATA 
+    Write-Debug 'Update-GRCosmConfRegister: GRCOSM_REGISTER_TABLE_DATA replaced'
+    Write-Debug "Type: $($UPDATED_PAGE_STORAGE_DATA.GetType())"
+    Write-Debug '############################  STORAGE FORMAT TO SEND ################################################'
+    #Write-Host $UPDATED_PAGE_STORAGE_DATA -ForegroundColor Green -BackgroundColor Black
+    $UPDATED_PAGE_STORAGE_DATA | Out-File "$BACKUP_FILE_BASE-LATEST.xml" -Encoding UTF8 -Force
+    Write-Debug "############################  STORAGE FORMAT TO SEND ################################################ `n `n `n"
+    Write-Debug "$BACKUP_FILE_BASE-LATEST.xml"
+    Set-ConfluencePageContent -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_ID $CONF_PAGE_ID -CONFLUENCE_PAGE_STORAGE_FILE "$BACKUP_FILE_BASE-LATEST.xml"
 
 }
 
-# Authenticate to MS Graph using interactive login, scope is for listing SharePoint documents and retrieving the unique identifier
-function Connect-MgGraphScoped {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]] $RequiredScopes,
-        [Parameter(Mandatory = $true)]
-        [string] $TenantName,
-        [Parameter(Mandatory = $false)]
-        [switch] $ReAuth = $false
-    )
-
-    # Get the current context
-    $context = Get-MgContext
-
-    # Check if the context and its scopes are not null
-    if (($null -ne $context) -and ($null -ne $context.Scopes) -and (-not $ReAuth)) {
-        # Check if the context's scopes include all the required scopes
-        $hasRequiredScopes = ($RequiredScopes | ForEach-Object { $context.Scopes -contains $_ } | Where-Object { $_ -eq $false } | Measure-Object | Select-Object -ExpandProperty Count) -eq 0
-
-        if (-not $hasRequiredScopes) {
-            # If the context doesn't have all the required scopes, authenticate again
-            Disconnect-MgGraph -ErrorAction SilentlyContinue
-            Connect-MgGraph -Scopes $RequiredScopes -TenantId $TenantName -NoWelcome
-        }
-    }
-    else {
-        # If there's no context or its scopes are null, authenticate
-
-        Connect-MgGraph -Scopes $RequiredScopes -TenantId $TenantName
-    }
-    Get-MgContext
-}
-
-function Get-SharePointFileMetadata {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$TenantName,
-        [Parameter(Mandatory = $true)]
-        [string]$SiteName,
-        [Parameter(Mandatory = $true)]
-        [string]$FOLDER_PATH_OR_NAME,
-        [Parameter(Mandatory = $false)]
-        [string]$SOURCE_FILENAME,
-        [Parameter(Mandatory = $false)]
-        [string]$REGEX_MULTI_SEARCH = $false
-    )
-    [ConfluenceMetadataObject[]] $CONFLUENCE_METADATA_OBJECTS = @()
-    # Declare FILE_ITEMS as an array of objects
-    [object[]] $FILE_ITEMS = @()
-    
-    $SiteWebUrl = "https://$TenantName.sharepoint.com/sites/$SiteName"
-    Connect-MgGraphScoped -RequiredScopes $MS_GRAPH_SCOPES -TenantName $TenantName
-    # Get the site ID by the site name
-    $Site = Get-MgSite -Search "$SiteWebUrl"
-    # Display all sites and their properties
-    $SiteId = $Site.Id
-    if (-not $SiteId) {
-        Write-Error "Site not found: $SiteName"
-    }
-    else {
-        Write-Debug "SiteId: $SiteId (SiteName: $SiteName)"
-    }
-    # Check if the site exists
-    $Site = Get-MgSite -SiteId $SiteId
-    # Ensure the necessary Microsoft Graph connection
-    $Drive = Get-MgSiteDrive -SiteId $SiteId
-    # Validate the $Drive.DriveType = 'documentLibrary'
-    $DriveId = $Drive.Id
-    if (-not $DriveId) {
-        Write-Error "Drive not found: $DriveId"
-    }
-    else {
-        Write-Debug "DriveId: $DriveId"
-    }
-    #Encode the folder name
-    # Get the string after the last '/' in the folder path (if there are any '/'s)
-    $FOLDER_NAME = $FOLDER_PATH_OR_NAME.Split('/')[-1]
-    Write-Debug "Folder Name: $FOLDER_NAME"
-
-    $folder = Search-MgDrive -DriveId $DriveId -Q $FOLDER_NAME | Where-Object { $_.Name -eq $FOLDER_NAME }
-    Write-debug 'Folder found: '
-    Write-Debug $folder.ToJson($null, 'IncludeAll')
-
-    # If more than one folder is found, select the first one
-    if ($folder.Count -gt 1) {
-        Write-Debug 'Folders found: '
-        $folder | ForEach-Object { Write-Debug "Folder: $($_.Name), ID: $($_.Id), WebUrl: $($_.WebUrl)" }
-        Write-Warning 'More than one folder found. Selecting the first one.'
-        $folder = $folder[0]
-    }
-    # Check if the folder exists
-    if ($null -eq $folder) {
-        Write-Error 'Folder not found.'
-        return
-    }
-    else {
-        Write-Debug "Folder: $($folder.Name), ID: $($folder.Id), WebUrl: $($folder.WebUrl)"
-    }
-    if ($REGEX_MULTI_SEARCH) {
-        Write-Debug "Searching for files with search string: $SOURCE_FILENAME and regex: $REGEX_MULTI_SEARCH"
-        $FILE_ITEMS = Search-MgDriveItem -DriveId $DriveId -DriveItemId $folder.Id -Q $SOURCE_FILENAME | Where-Object { $_.Name -match $REGEX_MULTI_SEARCH }
-        Write-Debug "File Items: $($file_items.Count)"
-        if ($($file_items.Count) -eq 0) {
-            Write-Error "No files found: $SOURCE_FILENAME with regex: $REGEX_MULTI_SEARCH"
-        }
-    }
-    else {
-        $FILE_ITEMS = Search-MgDriveItem -DriveId $DriveId -DriveItemId $folder.Id -Q $SOURCE_FILENAME | Where-Object { $_.Name.EndsWith($SOURCE_FILENAME) }
-        Write-Debug "File Items: $($file_items.Count)"
-        if ($($file_items.Count) -eq 0) {
-            Write-Debug 'Query: Search-MgDriveItem -DriveId $DriveId -DriveItemId $($folder.Id) -Q $SOURCE_FILENAME -Property name, Id, File.... | Where-Object { $_.Name -match $SOURCE_FILENAME }'
-            Write-Error 'No files found: $SOURCE_FILENAME'
-        }
-        elseif ($($file_items.Count) -gt 1) {
-            Write-Warning "More than one file found: $($file_items.Count)"
-            Write-Debug 'Query: Search-MgDriveItem -DriveId $DriveId -DriveItemId $($folder.Id) -Q $SOURCE_FILENAME -Property name, Id, File, .... | Where-Object { $_.Name -match $SOURCE_FILENAME }'
-            $file_items | ForEach-Object { Write-Debug '##############################################'; Write-Debug $($_.ToJSON($null, 'IncludeAll')); Write-Debug '##############################################' }
-            Write-Debug 'Defaulting to the first file'
-            $FILE_ITEM = $file_items[0]
-        }
-    }
-    $FILE_ITEMS | ForEach-Object {
-        $FILE_ITEM = Get-MgDriveItem -DriveId $DriveId -DriveItemId $($_.Id)
-        $CONFLUENCE_METADATA_OBJECTS += [ConfluenceMetadataObject]::new(@{
-                FILE_NAME    = $($FILE_ITEM.Name)
-                VIEW_URL     = $($FILE_ITEM.WebUrl)
-                DOWNLOAD_URL = $($($FILE_ITEM)['@microsoft.graph.downloadUrl'])
-                UNIQUE_ID    = $DOWNLOAD_URL.Split('UniqueId=')[1].Split('&')[0]
-                EMBED_URL    = "https://$TenantName.sharepoint.com/sites/$SiteName/_layouts/15/embed.aspx?UniqueId=$UNIQUE_ID"
-                LOCAL_ID     = $AC_LOCAL_ID
-                MACRO_ID     = $AC_MACRO_ID
-            })
-        # Write-Debug $CONFLUENCE_METADATA_OBJECT
-        # $actualPath = $FILE_ITEM.ParentReference.Path -replace '^.*root:', ''
-        # $fullPath = Join-Path -Path $actualPath -ChildPath $FILE_ITEM.Name
-        # $FILE_ITEM_PATH = Join-Path -Path "sites/$SiteName/Shared Documents/" -ChildPath $fullPath
-        # $FILE_ITEM_PATH.GetType()
-        # Write-Debug $FILE_ITEM_PATH
-    }
-    return $CONFLUENCE_METADATA_OBJECTS
-}
-
-# Function to extract all of the UNIQUE Placeholders from a Confluence page storage format, the placeholders are in the format of &lt;&lt;Tsfdalsdkfj&gt;&gt; - read the confluence storage data from file and return an array of unique placeholders
 function Get-OSMPlaceholdersJira {
     param (
         [Parameter(Mandatory = $true)]
@@ -292,7 +173,6 @@ function Get-OSMPlaceholdersJira {
     Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
 }
 
-# Function to extract all of the UNIQUE Placeholders from a Confluence page storage format, the placeholders are in the format of &lt;&lt;Tsfdalsdkfj&gt;&gt; - read the confluence storage data from file and return an array of unique placeholders
 function Get-OSMPlaceholdersConfluence {
     param (
         [Parameter(Mandatory = $true)]
@@ -351,97 +231,226 @@ function Get-OSMPlaceholdersConfluence {
     Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
 }
 
-# Function to build a CSV file by 
-
-# Function to create Confluence Page in Storage Format based on template, for viewing SharePoint Document (embedded in Confluence)
-function New-ConfluencePolicyViewerSharePoint {
-    param (
-        [Parameter(Mandatory = $false)]
-        [string]$PATH_TO_TEMPLATE = 'templates\confluence\GRCosm-SharePointViewer-Template.confluence',
-        [Parameter(Mandatory = $true)]
-        [string]$CONFLUENCE_PARENT,
-        [Parameter(Mandatory = $true)]
-        [ConfluenceMetadataObject]$CONFLUENCE_METADATA_OBJECT,
-        [Parameter(Mandatory = $false)]
-        [string]$PATH_TO_OUTPUT = "$env:AtlassianPowerKit_PROFILE_NAME\snapshots\confluence\latest\"
-    )
-    # Read the template
-    try {
-        $TEMPLATE = Get-Content $PATH_TO_TEMPLATE
-    }
-    catch {
-        Write-Error "Error reading template: $PATH_TO_TEMPLATE"
-    }
-    # Add CONFULENCE_PARENT to ConfluenceMetadataObject
-    $CONFLUENCE_METADATA_OBJECT.CONFLUENCE_PARENT = $CONFLUENCE_PARENT
-    # Check for null values in ConfluenceMetadataObject Properties
-    $CONFLUENCE_METADATA_OBJECT | Get-Member -MemberType Properties | ForEach-Object {
-        $property = $_.Name
-        $value = $CONFLUENCE_METADATA_OBJECT.$property
-        if (-not $value) {
-            Write-Error "Property $property is null"
-        }
-        Write-Debug "$property : $value"
-    }
-    # Create variable for the basename of the file from the ConfluenceMetadataObject.FILE_NAME, remove the file extension ensuring handling filename with multiple '.'s, throw error if number of characters removed is not 2-5 characters
-    $BASENAME = $CONFLUENCE_METADATA_OBJECT.FILE_NAME -replace '\.[^.]*$', ''
-    $CHARS_REMOVED = $CONFLUENCE_METADATA_OBJECT.FILE_NAME.Length - $BASENAME.Length
-    if ($CHARS_REMOVED -lt 2 -or $CHARS_REMOVED -gt 5) {
-        Write-Debug "BASENAME from FILE_NAME: $CONFLUENCE_METADATA_OBJECT.FILE_NAME"
-        Write-Warning "Extension removed was abnormal, check FILE_NAME: $CONFLUENCE_METADATA_OBJECT.FILE_NAME"
-    }
-    # Create array of placeholders in the template which can be identified by pattern: '{{ .*? }}'
-    $PLACEHOLDERS = $TEMPLATE | Select-String -Pattern '{{ .*? }}' -AllMatches | ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
-    Write-Debug "PLACEHOLDERS: $($PLACEHOLDERS)"
-    # If there are PLACEHOLDERS that are not defined in the ConfluenceMetadataObject, throw an error
-    $PLACEHOLDERS | ForEach-Object {
-        $placeholder = $_
-        $value = $CONFLUENCE_METADATA_OBJECT.$($_ -replace '{{ ', '' -replace ' }}', '')
-        if (-not $value) {
-            Write-Error "Placeholder $placeholder is not defined in ConfluenceMetadataObject"
-        }
-    }
-    # Replace the placeholders in the template with the values from the ConfluenceMetadataObject
-    $TEMPLATE_INPUT_ARRAY = $TEMPLATE | ForEach-Object {
-        $line = $_
-        $PLACEHOLDERS | ForEach-Object {
-            $placeholder = $_
-            $value = $CONFLUENCE_METADATA_OBJECT.$($_ -replace '{{ ', '' -replace ' }}', '')
-            $line = $line -replace $placeholder, $value
-        }
-        $line
-    }
-    # Write the output to a file and console as debug and advise user of the file location
-    $OUTPUT_FILE = "$PATH_TO_OUTPUT\$($CONFLUENCE_METADATA_OBJECT.FILE_NAME).confluence"
-    # Write the TEMPLATE_INPUT_ARRAY to the OUTPUT_FILE, create the directory if it does not exist and overwrite the file if it does
-    $TEMPLATE_INPUT_ARRAY | Set-Content -Path $OUTPUT_FILE -Force
-}
 
 
-# Function to generate SharePoint - Confluence object mapping
-function New-SharePointConfluenceObjectMapping {
-    param (
-        [Parameter(Mandatory = $false)]
-        [string]$PATH_TO_OUTPUT = "$env:AtlassianPowerKit_PROFILE_NAME\AtlasianPowerKit-GRCosm\$env:AtlassianPowerKit_PROFILE_NAME-config.json",
-        [Parameter(Mandatory = $true)]
-        [string]$TenantName,
-        [Parameter(Mandatory = $true)]
-        [string]$SiteName,
-        [Parameter(Mandatory = $true)]
-        [string]$FOLDER_NAME,
-        [Parameter(Mandatory = $true)]
-        [string]$CANDIDATE_FILE_PATTERN
-    )
-    # Find all files in the SharePoint folder that match the CANDIDATE_FILE_PATTERN, then call Get-SharePointFileMetadata to get the metadata for each file
-    $SHAREPOINT_FILES = Get-SharePointFileMetadata -TenantName $TenantName -SiteName $SiteName -FOLDER_PATH_OR_NAME $FOLDER_NAME -SOURCE_FILENAME $CANDIDATE_FILE_PATTERN
-}
-
+### SHAREPOINT FUNCTIONS
+# # Function to generate SharePoint - Confluence object mapping
+# function New-SharePointConfluenceObjectMapping {
+#     param (
+#         [Parameter(Mandatory = $false)]
+#         [string]$PATH_TO_OUTPUT = "$env:AtlassianPowerKit_PROFILE_NAME\AtlasianPowerKit-GRCosm\$env:AtlassianPowerKit_PROFILE_NAME-config.json",
+#         [Parameter(Mandatory = $true)]
+#         [string]$TenantName,
+#         [Parameter(Mandatory = $true)]
+#         [string]$SiteName,
+#         [Parameter(Mandatory = $true)]
+#         [string]$FOLDER_NAME,
+#         [Parameter(Mandatory = $true)]
+#         [string]$CANDIDATE_FILE_PATTERN
+#     )
+#     # Find all files in the SharePoint folder that match the CANDIDATE_FILE_PATTERN, then call Get-SharePointFileMetadata to get the metadata for each file
+#     $SHAREPOINT_FILES = Get-SharePointFileMetadata -TenantName $TenantName -SiteName $SiteName -FOLDER_PATH_OR_NAME $FOLDER_NAME -SOURCE_FILENAME $CANDIDATE_FILE_PATTERN
+# }
+# Authenticate to MS Graph using interactive login, scope is for listing SharePoint documents and retrieving the unique identifier
+# function Connect-MgGraphScoped {
+#     param(
+#         [Parameter(Mandatory = $true)]
+#         [string[]] $RequiredScopes,
+#         [Parameter(Mandatory = $true)]
+#         [string] $TenantName,
+#         [Parameter(Mandatory = $false)]
+#         [switch] $ReAuth = $false
+#     )
+#     # Get the current context
+#     $context = Get-MgContext
+#     # Check if the context and its scopes are not null
+#     if (($null -ne $context) -and ($null -ne $context.Scopes) -and (-not $ReAuth)) {
+#         # Check if the context's scopes include all the required scopes
+#         $hasRequiredScopes = ($RequiredScopes | ForEach-Object { $context.Scopes -contains $_ } | Where-Object { $_ -eq $false } | Measure-Object | Select-Object -ExpandProperty Count) -eq 0
+#         if (-not $hasRequiredScopes) {
+#             # If the context doesn't have all the required scopes, authenticate again
+#             Disconnect-MgGraph -ErrorAction SilentlyContinue
+#             Connect-MgGraph -Scopes $RequiredScopes -TenantId $TenantName -NoWelcome
+#         }
+#     }
+#     else {
+#         # If there's no context or its scopes are null, authenticate
+#         Connect-MgGraph -Scopes $RequiredScopes -TenantId $TenantName
+#     }
+#     Get-MgContext
+# }
+# function Get-SharePointFileMetadata {
+#     param (
+#         [Parameter(Mandatory = $true)]
+#         [string]$TenantName,
+#         [Parameter(Mandatory = $true)]
+#         [string]$SiteName,
+#         [Parameter(Mandatory = $true)]
+#         [string]$FOLDER_PATH_OR_NAME,
+#         [Parameter(Mandatory = $false)]
+#         [string]$SOURCE_FILENAME,
+#         [Parameter(Mandatory = $false)]
+#         [string]$REGEX_MULTI_SEARCH = $false
+#     )
+#     [ConfluenceMetadataObject[]] $CONFLUENCE_METADATA_OBJECTS = @()
+#     # Declare FILE_ITEMS as an array of objects
+#     [object[]] $FILE_ITEMS = @()
+#     $SiteWebUrl = "https://$TenantName.sharepoint.com/sites/$SiteName"
+#     Connect-MgGraphScoped -RequiredScopes $MS_GRAPH_SCOPES -TenantName $TenantName
+#     # Get the site ID by the site name
+#     $Site = Get-MgSite -Search "$SiteWebUrl"
+#     # Display all sites and their properties
+#     $SiteId = $Site.Id
+#     if (-not $SiteId) {
+#         Write-Error "Site not found: $SiteName"
+#     }
+#     else {
+#         Write-Debug "SiteId: $SiteId (SiteName: $SiteName)"
+#     }
+#     # Check if the site exists
+#     $Site = Get-MgSite -SiteId $SiteId
+#     # Ensure the necessary Microsoft Graph connection
+#     $Drive = Get-MgSiteDrive -SiteId $SiteId
+#     # Validate the $Drive.DriveType = 'documentLibrary'
+#     $DriveId = $Drive.Id
+#     if (-not $DriveId) {
+#         Write-Error "Drive not found: $DriveId"
+#     }
+#     else {
+#         Write-Debug "DriveId: $DriveId"
+#     }
+#     #Encode the folder name
+#     # Get the string after the last '/' in the folder path (if there are any '/'s)
+#     $FOLDER_NAME = $FOLDER_PATH_OR_NAME.Split('/')[-1]
+#     Write-Debug "Folder Name: $FOLDER_NAME"
+#     $folder = Search-MgDrive -DriveId $DriveId -Q $FOLDER_NAME | Where-Object { $_.Name -eq $FOLDER_NAME }
+#     Write-Debug 'Folder found: '
+#     Write-Debug $folder.ToJson($null, 'IncludeAll')
+#     # If more than one folder is found, select the first one
+#     if ($folder.Count -gt 1) {
+#         Write-Debug 'Folders found: '
+#         $folder | ForEach-Object { Write-Debug "Folder: $($_.Name), ID: $($_.Id), WebUrl: $($_.WebUrl)" }
+#         Write-Warning 'More than one folder found. Selecting the first one.'
+#         $folder = $folder[0]
+#     }
+#     # Check if the folder exists
+#     if ($null -eq $folder) {
+#         Write-Error 'Folder not found.'
+#         return
+#     }
+#     else {
+#         Write-Debug "Folder: $($folder.Name), ID: $($folder.Id), WebUrl: $($folder.WebUrl)"
+#     }
+#     if ($REGEX_MULTI_SEARCH) {
+#         Write-Debug "Searching for files with search string: $SOURCE_FILENAME and regex: $REGEX_MULTI_SEARCH"
+#         $FILE_ITEMS = Search-MgDriveItem -DriveId $DriveId -DriveItemId $folder.Id -Q $SOURCE_FILENAME | Where-Object { $_.Name -match $REGEX_MULTI_SEARCH }
+#         Write-Debug "File Items: $($file_items.Count)"
+#         if ($($file_items.Count) -eq 0) {
+#             Write-Error "No files found: $SOURCE_FILENAME with regex: $REGEX_MULTI_SEARCH"
+#         }
+#     }
+#     else {
+#         $FILE_ITEMS = Search-MgDriveItem -DriveId $DriveId -DriveItemId $folder.Id -Q $SOURCE_FILENAME | Where-Object { $_.Name.EndsWith($SOURCE_FILENAME) }
+#         Write-Debug "File Items: $($file_items.Count)"
+#         if ($($file_items.Count) -eq 0) {
+#             Write-Debug 'Query: Search-MgDriveItem -DriveId $DriveId -DriveItemId $($folder.Id) -Q $SOURCE_FILENAME -Property name, Id, File.... | Where-Object { $_.Name -match $SOURCE_FILENAME }'
+#             Write-Error 'No files found: $SOURCE_FILENAME'
+#         }
+#         elseif ($($file_items.Count) -gt 1) {
+#             Write-Warning "More than one file found: $($file_items.Count)"
+#             Write-Debug 'Query: Search-MgDriveItem -DriveId $DriveId -DriveItemId $($folder.Id) -Q $SOURCE_FILENAME -Property name, Id, File, .... | Where-Object { $_.Name -match $SOURCE_FILENAME }'
+#             $file_items | ForEach-Object { Write-Debug '##############################################'; Write-Debug $($_.ToJSON($null, 'IncludeAll')); Write-Debug '##############################################' }
+#             Write-Debug 'Defaulting to the first file'
+#             $FILE_ITEM = $file_items[0]
+#         }
+#     }
+#     $FILE_ITEMS | ForEach-Object {
+#         $FILE_ITEM = Get-MgDriveItem -DriveId $DriveId -DriveItemId $($_.Id)
+#         $CONFLUENCE_METADATA_OBJECTS += [ConfluenceMetadataObject]::new(@{
+#                 FILE_NAME    = $($FILE_ITEM.Name)
+#                 VIEW_URL     = $($FILE_ITEM.WebUrl)
+#                 DOWNLOAD_URL = $($($FILE_ITEM)['@microsoft.graph.downloadUrl'])
+#                 UNIQUE_ID    = $DOWNLOAD_URL.Split('UniqueId=')[1].Split('&')[0]
+#                 EMBED_URL    = "https://$TenantName.sharepoint.com/sites/$SiteName/_layouts/15/embed.aspx?UniqueId=$UNIQUE_ID"
+#                 LOCAL_ID     = $AC_LOCAL_ID
+#                 MACRO_ID     = $AC_MACRO_ID
+#             })
+#         # Write-Debug $CONFLUENCE_METADATA_OBJECT
+#         # $actualPath = $FILE_ITEM.ParentReference.Path -replace '^.*root:', ''
+#         # $fullPath = Join-Path -Path $actualPath -ChildPath $FILE_ITEM.Name
+#         # $FILE_ITEM_PATH = Join-Path -Path "sites/$SiteName/Shared Documents/" -ChildPath $fullPath
+#         # $FILE_ITEM_PATH.GetType()
+#         # Write-Debug $FILE_ITEM_PATH
+#     }
+#     return $CONFLUENCE_METADATA_OBJECTS
+# }
 #Install-AtlassianPowerKitGRCosmDependencies
-if ($ReAuth) {
-    if (!$TenantName) {
-        $TenantName = Read-Host -Prompt 'Enter the Tenant Name'
-    }
-    Connect-MgGraphScoped -RequiredScopes $MS_GRAPH_SCOPES -TenantName $TenantName
-}
-
-# Funtion to 
+# if ($ReAuth) {
+#     if (!$TenantName) {
+#         $TenantName = Read-Host -Prompt 'Enter the Tenant Name'
+#     }
+#     Connect-MgGraphScoped -RequiredScopes $MS_GRAPH_SCOPES -TenantName $TenantName
+#}
+# # Function to create Confluence Page in Storage Format based on template, for viewing SharePoint Document (embedded in Confluence)
+# function New-ConfluencePolicyViewerSharePoint {
+#     param (
+#         [Parameter(Mandatory = $false)]
+#         [string]$PATH_TO_TEMPLATE = 'templates\confluence\GRCosm-SharePointViewer-Template.confluence',
+#         [Parameter(Mandatory = $true)]
+#         [string]$CONFLUENCE_PARENT,
+#         [Parameter(Mandatory = $true)]
+#         [ConfluenceMetadataObject]$CONFLUENCE_METADATA_OBJECT,
+#         [Parameter(Mandatory = $false)]
+#         [string]$PATH_TO_OUTPUT = "$env:AtlassianPowerKit_PROFILE_NAME\snapshots\confluence\latest\"
+#     )
+#     # Read the template
+#     try {
+#         $TEMPLATE = Get-Content $PATH_TO_TEMPLATE
+#     }
+#     catch {
+#         Write-Error "Error reading template: $PATH_TO_TEMPLATE"
+#     }
+#     # Add CONFULENCE_PARENT to ConfluenceMetadataObject
+#     $CONFLUENCE_METADATA_OBJECT.CONFLUENCE_PARENT = $CONFLUENCE_PARENT
+#     # Check for null values in ConfluenceMetadataObject Properties
+#     $CONFLUENCE_METADATA_OBJECT | Get-Member -MemberType Properties | ForEach-Object {
+#         $property = $_.Name
+#         $value = $CONFLUENCE_METADATA_OBJECT.$property
+#         if (-not $value) {
+#             Write-Error "Property $property is null"
+#         }
+#         Write-Debug "$property : $value"
+#     }
+#     # Create variable for the basename of the file from the ConfluenceMetadataObject.FILE_NAME, remove the file extension ensuring handling filename with multiple '.'s, throw error if number of characters removed is not 2-5 characters
+#     $BASENAME = $CONFLUENCE_METADATA_OBJECT.FILE_NAME -replace '\.[^.]*$', ''
+#     $CHARS_REMOVED = $CONFLUENCE_METADATA_OBJECT.FILE_NAME.Length - $BASENAME.Length
+#     if ($CHARS_REMOVED -lt 2 -or $CHARS_REMOVED -gt 5) {
+#         Write-Debug "BASENAME from FILE_NAME: $CONFLUENCE_METADATA_OBJECT.FILE_NAME"
+#         Write-Warning "Extension removed was abnormal, check FILE_NAME: $CONFLUENCE_METADATA_OBJECT.FILE_NAME"
+#     }
+#     # Create array of placeholders in the template which can be identified by pattern: '{{ .*? }}'
+#     $PLACEHOLDERS = $TEMPLATE | Select-String -Pattern '{{ .*? }}' -AllMatches | ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
+#     Write-Debug "PLACEHOLDERS: $($PLACEHOLDERS)"
+#     # If there are PLACEHOLDERS that are not defined in the ConfluenceMetadataObject, throw an error
+#     $PLACEHOLDERS | ForEach-Object {
+#         $placeholder = $_
+#         $value = $CONFLUENCE_METADATA_OBJECT.$($_ -replace '{{ ', '' -replace ' }}', '')
+#         if (-not $value) {
+#             Write-Error "Placeholder $placeholder is not defined in ConfluenceMetadataObject"
+#         }
+#     }
+#     # Replace the placeholders in the template with the values from the ConfluenceMetadataObject
+#     $TEMPLATE_INPUT_ARRAY = $TEMPLATE | ForEach-Object {
+#         $line = $_
+#         $PLACEHOLDERS | ForEach-Object {
+#             $placeholder = $_
+#             $value = $CONFLUENCE_METADATA_OBJECT.$($_ -replace '{{ ', '' -replace ' }}', '')
+#             $line = $line -replace $placeholder, $value
+#         }
+#         $line
+#     }
+#     # Write the output to a file and console as debug and advise user of the file location
+#     $OUTPUT_FILE = "$PATH_TO_OUTPUT\$($CONFLUENCE_METADATA_OBJECT.FILE_NAME).confluence"
+#     # Write the TEMPLATE_INPUT_ARRAY to the OUTPUT_FILE, create the directory if it does not exist and overwrite the file if it does
+#     $TEMPLATE_INPUT_ARRAY | Set-Content -Path $OUTPUT_FILE -Force
+# }

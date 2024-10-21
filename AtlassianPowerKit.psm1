@@ -21,9 +21,27 @@
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-Push-Location $PSScriptRoot
-$script:AtlassianPowerKitRequiredModules = @('PowerShellGet', 'Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
-$script:LOCAL_MODULES = $(Get-ChildItem -Path . -Recurse -Depth 1 -Include *.psd1 -Exclude 'AtlassianPowerKit.psd1', 'AtlassianPowerKit-Shared.psd1', 'Naive-ConflunceStorageValidator.psd1')
+
+
+function Test-OSMHomeDir {
+    # If the OSM_HOME environment variable is not set, set it to the current directory.
+    $new_home = $(Get-Item $pwd).FullName | Split-Path -Parent
+    if (-not $env:OSM_HOME) {
+        Write-Debug "Setting OSM_HOME to $new_home"
+        $env:OSM_HOME = $new_home
+    }
+    # Check the OSM_HOME environment variable directory exists
+    if (-not (Test-Path $env:OSM_HOME)) {
+        Write-Warning "OSM_HOME directory not found: $env:OSM_HOME"
+        Write-Warn "Changing OSM_HOME to $new_home"
+        $env:OSM_HOME = $new_home
+    }
+    if ($env:OSM_HOME -ne $new_home) {
+        Write-Warn "OSM_HOME is set to $env:OSM_HOME, but the script location indicates it should be $new_home. This may cause issues."
+    }
+    $ValidatedOSMHome = (Get-Item $env:OSM_HOME).FullName
+    return $ValidatedOSMHome
+}
 
 # function to create a zip archives of the profile directories
 function Clear-AtlassianPowerKitProfileDirs {
@@ -45,57 +63,51 @@ function Invoke-AtlassianPowerKitFunction {
         [Parameter(Mandatory = $true)]
         [string] $FunctionName,
         [Parameter(Mandatory = $false)]
-        [string] $Profile,
+        [string] $SelectedProfileName,
         [Parameter(Mandatory = $false)]
         [hashtable] $FunctionParameters
     )
-    Import-NestedModules
-    if ($FunctionParameters) {
-        Write-Debug "Setting Input Parameters: $FunctionParameters"
-        $INPUT_PARAMETERS = $FunctionParameters
+    $TEMP_DIR = "$env:OSM_HOME\$env:AtlassianPowerKit_PROFILE_NAME\.temp"
+    if (-not (Test-Path $TEMP_DIR)) {
+        New-Item -ItemType Directory -Path $TEMP_DIR -Force | Out-Null
     }
-    else {
-        Write-Debug 'No input parameters provided.'
-    }
+    $TIMESTAMP = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $LOG_FILE = "$TEMP_DIR\$FunctionName-$TIMESTAMP.log"
     if ($Profile) {
         if (!(Get-CurrentAtlassianPowerKitProfile)) {
-            $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $Profile
+            $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $SelectedProfileName
         } 
         else {
             $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile
             # Test if a profile is loaded, if not, ask the user to select a profile
         }
     } 
-    else {
-        $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile
-        # Test if a profile is loaded, if not, ask the user to select a profile
-    }
     if (!$LOADED_PROFILE) {
-        Write-Host 'No profile loaded. Please select a profile.'
-        $LOADED_PROFILE = Show-AtlassianPowerKitProfileList
+        Write-Error "Profile $SelectedProfileName not found. Exiting."
+        throw "Profile $SelectedProfileName not found. Exiting."
     }
-    Write-Debug "Invoking function: $FunctionName with profile: $LOADED_PROFILE"
-    
-    # Splattting the parameters to the function
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    if ($INPUT_PARAMETERS) {
-        Invoke-Expression "$FunctionName @INPUT_PARAMETERS"
+    $stopwatch.Start()
+    if ($FunctionParameters) {
+            Write-Debug "Running function: $FunctionName with parameters: $($FunctionParameters | Out-String)"
+            & $FunctionName @FunctionParameters
     }
     else {
-        Invoke-Expression "$FunctionName"
+        Invoke-Expression "$FunctionName" 
     }
     $stopwatch.Stop()
     Write-Output "Function $FunctionName completed - execution time: $($stopwatch.Elapsed.TotalSeconds) seconds"
+    Write-Output "Log file: $LOG_FILE"
 }
 
 function Import-NestedModules {
     # Get directory of this module
-    $pwd
+    $LOCAL_MODULES = $(Get-ChildItem -Path . -Recurse -Depth 1 -Include *.psd1 -Exclude 'AtlassianPowerKit.psd1', 'AtlassianPowerKit-Shared.psd1', 'Naive-ConflunceStorageValidator.psd1')
     # Find list of module in subdirectories and import them
     Import-Module .\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1 -Force
     #Get-Module -Name AtlassianPowerKit*
-    $script:LOCAL_MODULES | ForEach-Object {
-        Write-Debug "Importing nested module: .\$($_.BaseName)\$($_.Name)"
+    $LOCAL_MODULES | ForEach-Object {
+        #Write-Debug "Importing nested module: .\$($_.BaseName)\$($_.Name)"
         Import-Module $_.FullName -Force
         # Validate the module is imported
         if (-not (Get-Module -Name $_.BaseName)) {
@@ -106,7 +118,8 @@ function Import-NestedModules {
 }
 
 function Get-RequisitePowerKitModules {
-    $script:AtlassianPowerKitRequiredModules | ForEach-Object {
+    $AtlassianPowerKitRequiredModules = @('PowerShellGet', 'Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
+    $AtlassianPowerKitRequiredModules | ForEach-Object {
         # Import or install the required module
         try {
             if (-not (Get-Module -Name $_ -ListAvailable)) {
@@ -130,7 +143,8 @@ function Show-AtlassianPowerKitFunctions {
     $selectedFunction = $null
     # List nested modules and their exported functions to the console in a readable format, grouped by module
     $colors = @('Green', 'Cyan', 'Red', 'Magenta', 'Yellow')
-    $localModules = $script:LOCAL_MODULES | ForEach-Object {
+    $LOCAL_MODULES = $(Get-ChildItem -Path . -Recurse -Depth 1 -Include *.psd1 -Exclude 'AtlassianPowerKit.psd1', 'AtlassianPowerKit-Shared.psd1', 'Naive-ConflunceStorageValidator.psd1')
+    $localModules = $LOCAL_MODULES | ForEach-Object {
         Write-Debug "Local module: $($_.FullName -replace '.psd1', '')"
         Import-Module -Name $_.FullName -Force -ErrorAction Stop
         Get-Module -Name $($_.Name -replace '.psd1', '') -Verbose -ErrorAction Stop
@@ -147,7 +161,7 @@ function Show-AtlassianPowerKitFunctions {
         $spaces = ' ' * (51 - $_.Name.Length)
         Write-Host '' -BackgroundColor Black
         Write-Host "Module: $($_.Name)" -BackgroundColor $color -ForegroundColor White -NoNewline
-        Write-Host $spaces  -BackgroundColor $color -NoNewline
+        Write-Host $spaces -BackgroundColor $color -NoNewline
         Write-Host ' ' -BackgroundColor Black
         $spaces = ' ' * 40
         Write-Host " Exported Commands:$spaces" -BackgroundColor "Dark$color" -ForegroundColor White -NoNewline
@@ -302,6 +316,10 @@ function AtlassianPowerKit {
         [hashtable] $FunctionParameterHashTable
     )
     try {
+        #Push-Location -Path $PSScriptRoot -ErrorAction Continue
+        Write-Debug "Starting AtlassianPowerKit, running from $((Get-Item -Path $PSScriptRoot).FullName)"
+        Write-Debug "OSM_HOME: $(Test-OSMHomeDir)"
+        # If current directory is not the script root, push the script root to the stack
         Get-RequisitePowerKitModules
         if ($ResetVault) {
             Clear-AtlassianPowerKitVault
@@ -323,18 +341,12 @@ function AtlassianPowerKit {
                 }
             }
             else {
-                Write-Debug "Example: Use-AtlassianPowerKit -ProfileName 'profileName' -FunctionName 'functionName'"
+                Write-Debug "Example: AtlassianPowerKit -ProfileName 'profileName' -FunctionName 'functionName' -FunctionParameterHashTable @{parameter1='value1';parameter='value2'}"
                 Write-Error 'No -ProfileName provided with FunctionName, Exiting...'
             }
         } 
         $InputProfileName = $Profile.Trim().ToLower()
-        $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $InputProfileName -Force
-        #Write-Debug "Setting provided profile: $ProfileName"
-        #Set-AtlassianPowerKitProfile $ProfileName
-        if ($LOADED_PROFILE -ne $InputProfileName) {
-            Write-Error 'Profile not loaded! Exiting...'
-            return $false
-        }
+        Set-AtlassianPowerKitProfile -SelectedProfileName $InputProfileName
         if (!$FunctionName) {
             Show-AtlassianPowerKitFunctions
         }
@@ -356,11 +368,16 @@ function AtlassianPowerKit {
         }
     }
     catch {
-        Write-Debug "Exiting - with error: $($_.Exception.Message)"
+        # Write call stack and sub-function error messages to the debug output
+        Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+        # Write full call stack to the debug output and error message to the console
+        Get-PSCallStack
+        Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+        Write-Error $_.Exception.Message
     }
     finally {
         #Clear-AtlassianPowerKitProfile
-        #Pop-Location
+        Pop-Location
         Write-Debug 'Gracefully exited AtlassianPowerKit'
     }
 }

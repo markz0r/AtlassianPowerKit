@@ -67,26 +67,25 @@ GitHub: https://github.com/markz0r/AtlassianPowerKit
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-
+$REQ_SLEEP_SEC = 1
+$REQ_SLEEP_SEC_LONG = 10
 function Convert-JiraIssueToTableRow {
     param (
         [Parameter(Mandatory = $true)]
-        [System.Object]$ISSUE,
-        [Parameter(Mandatory = $true)]
-        [System.Object]$COLUMN_VALS
+        [array]$RAW_ROW
     )
     $TABLE_ROW = '<tr>'
-    $COLUMN_VALS | ForEach-Object {
-        $COLUMN_NAME = $_.id
-        $COLUMN_VAL = $ISSUE.fields.$COLUMN_NAME
-        if ($COLUMN_VAL) {
-            $TABLE_ROW += "<td><p>$COLUMN_VAL</p></td>"
+    $RAW_ROW | ForEach-Object {
+        $ROW_VAL = $_
+        if ($ROW_VAL) {
+            $TABLE_ROW += "<td><p>$ROW_VAL</p></td>"
         }
         else {
-            $TABLE_ROW += '<td><p></p></td>'
+            $TABLE_ROW += '<td><p>N/A</p></td>'
         }
     }
     $TABLE_ROW += '</tr>'
+    $TABLE_ROW 
     return $TABLE_ROW
 }
 
@@ -95,63 +94,58 @@ function Get-JiraFilterResultsAsConfluenceTable {
         [Parameter(Mandatory = $true)]
         [string]$FILTER_ID
     )
-    
     $FILTER_INFO = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/filter/$($FILTER_ID)" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
 
     $FILTER_COLUMNS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/filter/$($FILTER_ID)/columns" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
-    $COLUMN_VALS = $FILTER_COLUMNS.value
-    $JIRA_ISSUES_JSON_FILE_PATH = Get-JiraCloudJQLQueryResult -JQL_STRING $FILTER_INFO.jql -RETURN_FIELDS $COLUMN_VALS
-    #$JIRA_ISSUES_RETURN = $JIRA_ISSUES_RAW | ConvertTo-Json | ConvertFrom-Json -Depth 30
-    # Read the JSON file
-    $jsonContent = $(Get-Content -Path $JIRA_ISSUES_JSON_FILE_PATH -Raw | ConvertFrom-Json)
-
-    # Initialize an array to hold all issues
-    $allIssues = @()
-
-    # Iterate through each JSON object in the array
-    foreach ($jsonObject in $jsonContent) {
-        # Check if the jsonObject has an issues property
-        if ($jsonObject.PSObject.Properties.Name -contains 'issues') {
-            # Merge the issues arrays
-            $allIssues += $jsonObject.issues
-        }
-    }
-    # Get the filter results with just the filter columns
-    #
+    $COLUMN_VALS = $FILTER_COLUMNS | ForEach-Object { $_.Value }
+        
     $TABLE_HEADERS = '<tbody><tr>'
     $CONFLUENCE_STORAGE_RAW_FOOTER = "</tbody><hr /><ul><li><p>Updated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')</p></li><li><p>Source: <a href=""$($FILTER_INFO.viewURL)"">$($FILTER_INFO.name)</a></p></li></ul><hr />"
     # Write-Debug "Filter Columns [$( $($FILTER_COLUMNS).count)]"
     #Write-Debug "Filter Columns: $($FILTER_COLUMNS | ConvertTo-Json -Depth 10)"
-    $TABLE_HEADERS += $FILTER_COLUMNS | ForEach-Object {
-        return "<th><p>$($_.label)</p><th>"
+    $FILTER_COLUMNS | ForEach-Object {
+        $TABLE_HEADERS += "<th><p>$($_.label)</p></th>"
     }
     $TABLE_HEADERS += '</tr>'
-    Write-Debug '##########################################################'
-    Write-Debug 'Header: '
-    Write-Debug $TABLE_HEADERS
-    Write-Debug '##########################################################'
-    Write-Debug "Filter Results [$($allIssues.Count)]: "
-    $TABLE_ROWS = foreach ($issue in $allIssues) {
-        return Convert-JiraIssueToTableRow -ISSUE $_ -COLUMN_VALS $COLUMN_VALS
+    # Write-Debug '##########################################################'
+    # Write-Debug 'Get-JiraFilterResultsAsConfluenceTable - Header: '
+    # Write-Debug $TABLE_HEADERS
+    # Write-Debug '##########################################################'
+        
+    # Get-Content $_ | ConvertFrom-Json -Depth 20 | ForEach-Object { Write-Host "Key: $($_.key) - Summary: $($_.fields.summary) - Portal Link: $($_.fields.customfield_10393) - Classification:$($_.fields.customfield_10275) " }
+    Write-Debug '########################################################## Get-JiraFilterResultsAsConfluenceTable calling Get-JiraCloudJQLQueryResult'
+    $JSON_PART_FILES = Get-JiraCloudJQLQueryResult -JQL_STRING $FILTER_INFO.jql -RETURN_FIELDS $COLUMN_VALS
+    Write-Debug '########################################################## Get-JiraFilterResultsAsConfluenceTable returned from Get-JiraCloudJQLQueryResult - Done'
+    Write-Debug '########################################################## Get-JiraFilterResultsAsConfluenceTable - JSON_PART_FILES: ParseJIRAIssueJSONForConfluence '
+    $HASH_ARRAYLIST = $JSON_PART_FILES | ForEach-Object {
+        Write-Debug "Processing JSON_PART_FILE: $_"
+        ParseJIRAIssueJSONForConfluence -JSON_PART_FILE $_
     }
-    # first 5 rows
-    $TABLE_ROWS | Select-Object -First 5 | ForEach-Object {
-        Write-Debug "Row: $_"
-    }
-    Write-Debug '##########################################################'
-    Write-Debug '##########################################################'
-    Write-Debug 'Footer: '
-    Write-Debug $CONFLUENCE_STORAGE_RAW_FOOTER
-    Write-Debug '##########################################################'
-    $CONFLUENCE_STORAGE_RAW = $TABLE_HEADERS
+    Write-Debug "HASH_ARRAYLIST: $($HASH_ARRAYLIST.GetType())"
+    Write-Debug '########################################################## Get-JiraFilterResultsAsConfluenceTable - HASH_ARRAYLIST: '
     
-    $CONFLUENCE_STORAGE_RAW += $TABLE_ROWS
-    $CONFLUENCE_STORAGE_RAW += $CONFLUENCE_STORAGE_RAW_FOOTER
-    Write-Debug '##########################################################'
-    Write-Debug 'Confluence Storage Raw: '
-    Write-Debug $CONFLUENCE_STORAGE_RAW
-    Write-Debug '##########################################################'
-    return $true
+    $TABLE_ROWS = @($HASH_ARRAYLIST | ForEach-Object {
+            $ROW_HASH = $_
+            Write-Debug '####################'
+
+            Write-Debug "ISSUE: $($ROW_HASH.Key)"
+            #Write-Debug 'FIELDS: ' 
+            #$($ROW_HASH.fields) | ConvertTo-Json -Depth 10 | Write-Debug
+            $ORDERED_FIELD_VALUES = @()
+            foreach ($FILTER_COLUMN in $FILTER_COLUMNS) {
+                $FIELD_NAME = $FILTER_COLUMN.value
+                $FIELD_VALUE = $ROW_HASH.Fields[$FIELD_NAME]
+
+                # Add the field value to the ordered list
+                $ORDERED_FIELD_VALUES += $FIELD_VALUE
+            }
+            Write-Debug 'Get-JiraFilterResultsAsConfluenceTable: Starting Convert-JiraIssueToTableRow...with ORDERED_FIELD_VALUES: '
+            Convert-JiraIssueToTableRow -RAW_ROW $ORDERED_FIELD_VALUES
+        }
+    )
+        
+    $CONFLUENCE_STORAGE_RAW = $TABLE_HEADERS + $TABLE_ROWS + $CONFLUENCE_STORAGE_RAW_FOOTER
+    return $CONFLUENCE_STORAGE_RAW
 }
 
 function Get-JiraIssueChangeNullsFromJQL {
@@ -293,7 +287,7 @@ function Get-JSONFieldsWithData {
 
 
     # Write $DATA_FIELD_LIST to a file
-    $OUTPUT_FILE = "$env:AtlassianPowerKit_PROFILE_NAME\$env:AtlassianPowerKit_PROFILE_NAME-FieldsWithData-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+    $OUTPUT_FILE = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA\$env:AtlassianPowerKit_PROFILE_NAME-FieldsWithData-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
     if (-not (Test-Path $OUTPUT_FILE)) {
         New-Item -ItemType File -Path $OUTPUT_FILE -Force | Out-Null
     }
@@ -385,25 +379,6 @@ function Get-JiraIssueLinks {
     return $ISSUE_LINKS_JSON_ARRAY
 }
 
-function Get-JiraCloudJQLQueryResultPages {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$P_BODY_JSON,
-        [Parameter(Mandatory = $false)]
-        [string]$JSON_FILE_PATHNAME
-    )
-    $ISSUES = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body $P_BODY_JSON -ContentType 'application/json'
-    # Backoff if the API returns a 429 status code
-    if ($ISSUES.statusCode -eq 429) {
-        Write-Debug 'API Rate Limit Exceeded. Waiting for 60 seconds...'
-        Start-Sleep -Seconds 20
-        continue
-    }
-    Write-Debug "Total: $($ISSUES.total) - Collecting issues: $($P_BODY.startAt) to $($P_BODY.startAt + 100)..."
-    #Out-File -FilePath "$JSON_FILE_PATHNAME"
-    $ISSUES
-}
-
 # Function to return JQL query results as a PowerShell object that includes a loop to ensure all results are returned even if the
 # number of results exceeds the maximum number of results returned by the Jira Cloud API
 function Get-JiraCloudJQLQueryResult {
@@ -413,31 +388,25 @@ function Get-JiraCloudJQLQueryResult {
         [Parameter(Mandatory = $false)]
         [string[]]$RETURN_FIELDS
     )
-    $JIRA_FIELD_MAPS = Get-JIRAFieldMap
+    $OUTPUT_DIR = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA\$($env:AtlassianPowerKit_PROFILE_NAME)"
+    $OUTPUT_FILE = "$OUTPUT_DIR\JIRA-Query-Results-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+    if (-not (Test-Path $OUTPUT_DIR)) {
+        New-Item -ItemType Directory -Path $OUTPUT_DIR -Force | Out-Null
+    } 
     $POST_BODY = @{
-        fieldsByKeys = $false
         jql          = "$JQL_STRING"
+        fieldsByKeys = $false
         maxResults   = 1
-        startAt      = 0
-        expand       = @('names')
     }
     # Get total number of results for the JQL query
     $WARNING_LIMIT = 2000
-    do {
-        Write-Debug 'Validating JQL Query...'
-        $VALIDATE_QUERY = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body ($POST_BODY | ConvertTo-Json) -ContentType 'application/json'
-        if ($VALIDATE_QUERY.statusCode -eq 429) {
-            Write-Debug 'API Rate Limit Exceeded. Waiting for 60 seconds...'
-            Start-Sleep -Seconds 20
-            continue
-        }
-        Write-Debug "Validating JQL Query... Total: $($VALIDATE_QUERY.total)"
-    } until ($VALIDATE_QUERY.total)
-    if ($VALIDATE_QUERY.total -eq 0) {
+    $VALIDATE_QUERY = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body ($POST_BODY | ConvertTo-Json) -ContentType 'application/json'
+    $DYN_LIMIT = $VALIDATE_QUERY.total
+    if ($DYN_LIMIT -eq 0) {
         Write-Debug 'No results found for the JQL query...'
         return
     }
-    elseif ($VALIDATE_QUERY.total -gt $WARNING_LIMIT) {
+    elseif ($DYN_LIMIT -gt $WARNING_LIMIT) {
         # Advise the user that the number of results exceeds $WARNING_LIMIT and ask if they want to continue
         Write-Warning "The number of results for the JQL query exceeds $WARNING_LIMIT. Do you want to continue? [Y/N]"
         $continue = Read-Host
@@ -446,83 +415,32 @@ function Get-JiraCloudJQLQueryResult {
             return
         }
     }
+    $POST_BODY.expand = @('names', 'renderedFields') 
+    $POST_BODY.remove('startAt')
     $POST_BODY.maxResults = 100
-    if ($RETURN_FIELDS) {
+    if ($RETURN_FIELDS -and $null -ne $RETURN_FIELDS -and $RETURN_FIELDS.Count -gt 0) {
         $POST_BODY.fields = $RETURN_FIELDS
     }
     else {
+        Write-Debug 'RETURN_FIELDS not provided, using default fields...'
         $POST_BODY.fields = @('*all', '-attachments', '-comment', '-issuelinks', '-subtasks', '-worklog')
     }
-
-    $STARTAT = 0; $ISSUES_LIST = @(); $jobs = @(); $maxConcurrentJobs = 100
-    while ($STARTAT -lt $VALIDATE_QUERY.total) {
-        # If the number of running jobs is equal to the maximum, wait for one to complete
-        while (($jobs | Where-Object { $_.State -eq 'Running' }).Count -ge $maxConcurrentJobs) {
-            # Wait for any job to complete
-            $completedJob = $jobs | Wait-Job -Any
-            # Get the result of the completed job
-            $ISSUES_LIST += Receive-Job -Job $completedJob
-            # Remove the completed job
-            Remove-Job -Job $completedJob
-            # Remove the completed job from the jobs array
-            $jobs = $jobs | Where-Object { $_.Id -ne $completedJob.Id }
-        }
-        $POST_BODY.startAt = $STARTAT
-        $jsonFilePath = "Get-JiraCloudJQLQueryResult-$STARTAT.json"
-        $P_BODY_JSON = $POST_BODY | ConvertTo-Json
-        Write-Debug "Getting Jira Cloud JQL Query Results Pages... P_BODY_JSON: $P_BODY_JSON, JSON_FILE_PATHNAME: $jsonFilePath"
-        $jobs += Start-Job -ScriptBlock {
-            $ISSUES = Invoke-RestMethod -Uri "https://$($args[1])/rest/api/3/search" -Headers $args[2] -Method Post -Body $args[0] -ContentType 'application/json'
-            if ($ISSUES.statusCode -eq 429) {
-                Write-Debug 'API Rate Limit Exceeded. Waiting for 60 seconds...'
-                Start-Sleep -Seconds 20
-                continue
-            }
-            Write-Debug "Total: $($ISSUES.total) - Collecting issues: $($args[0].startAt) to $($args[0].startAt + 100)..."
-            # if ($ISSUES.issues -and $args[1]) {
-            #     Write-Debug "Exporting $($args[0].startAt) plus $($args[0].maxResults) to $($args[1])"
-            #     $ISSUES.issues | Select-Object -Property key, fields | ConvertTo-Json -Depth 30 | Out-File -FilePath $args[1]
-            #     # Check file was written
-            #     if (-not (Test-Path $args[1])) {
-            #         Write-Error "File not written: $($args[1])"
-            #     }
-            # }
-            # Get-JiraCloudJQLQueryResultPages -P_BODY_JSON $args[0] -JSON_FILE_PATHNAME $args[1]
-            $ISSUES
-        } -ArgumentList @($P_BODY_JSON, $($env:AtlassianPowerKit_AtlassianAPIEndpoint), $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders), $jsonFilePath)
-        Write-Debug 'Sleeping for 2 seconds before next iteration...'
-        Start-Sleep -Seconds 2
-        $STARTAT += 100
-    }
-    # Wait for all jobs to complete
-    Write-Debug 'Waiting for all jobs to complete...'
-    # Start timer
-    $stopWatch = [System.Diagnostics.Stopwatch]::StartNew()
-    $jobs | Wait-Job
-    # Stop timer
-    $stopWatch.Stop()
-    Write-Debug "All jobs completed with wait of $($stopWatch.Elapsed.TotalSeconds) seconds."
-    $ISSUES_LIST += $jobs | Receive-Job
-    # Remove the remaining jobs
-    $jobs | Remove-Job
-    # Make a combined JSON file of all the JSON data
-    $COMBINED_JSON_FILE = "$($env:AtlassianPowerKit_PROFILE_NAME)\$($env:AtlassianPowerKit_PROFILE_NAME)-JQLExport-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-Results-Combined.json"
-    # If JIRA_FIELD_MAPS is defined, replace the field key with the field name in the JSON object
-    $ISSUE_LIST_JSON = $ISSUES_LIST | ConvertTo-Json -Depth 30
-    if ($JIRA_FIELD_MAPS) {
-        # Iterate through $JIRA_FIELD_MAPS and replace the field key with the field name in the JSON object
-        $JIRA_FIELD_MAPS.GetEnumerator() | ForEach-Object {
-            $FIELD_KEY = $_.Key
-            $FIELD_NAME = $_.Value
-            # Replace all instances of the field key with the field name in the JSON object
-            $ISSUE_LIST_JSON = $ISSUE_LIST_JSON -replace $FIELD_KEY, $FIELD_NAME
-        }
-    }
-    # Write the combined JSON file
-    $ISSUE_LIST_JSON | Out-File -FilePath $COMBINED_JSON_FILE
-    $OUTPUT_FILE_PATH = $(Get-Item -Path $COMBINED_JSON_FILE).FullName
-    return $OUTPUT_FILE_PATH
+    # sequence for 0 to $VALIDATE_QUERY.total in increments of 100
+    # Set contents of $OUTPUT_FILE '[
+    #'[' | Out-File -FilePath $OUTPUT_FILE
+    $OUTPUT_FILE_LIST = 0..($DYN_LIMIT / 100) | ForEach-Object -Parallel { 
+        $PARTIAL_OUTPUT_FILE = ($using:OUTPUT_FILE).Replace('.json', "_$_.json")
+        $REST_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body $(@{startAt = ($_ * 100) } + $using:POST_BODY | ConvertTo-Json -Depth 30) -ContentType 'application/json'
+        $REST_RESPONSE.issues | ConvertTo-Json -Depth 100 -Compress | Out-File -FilePath $PARTIAL_OUTPUT_FILE -Append
+            
+        return $PARTIAL_OUTPUT_FILE
+    } -AsJob -ThrottleLimit 5 | Receive-Job -AutoRemoveJob -Wait 
+    #Write-Debug '########## Get-JiraCloudJQLQueryResult completed, OUTPUT_FILE_LIST: '
+    #$OUTPUT_FILE_LIST | Write-Debug
+    # Combine raw, compressed JSON files into a single JSON file that is valid JSON
+    return $OUTPUT_FILE_LIST
 }
+
 
 # Function to get change log for a Jira issue
 function Get-JiraIssueChangeLog {
@@ -866,13 +784,13 @@ function Get-JiraProjectIssuesTypes {
         [Parameter(Mandatory = $true)]
         [string]$JiraCloudProjectKey,
         [Parameter(Mandatory = $false)]
-        [string]$OUTPUT_PATH = ".\$env:AtlassianPowerKit_PROFILE_NAME\"
+        [string]$OUTPUT_PATH = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA"
     )
     $FILENAME = "$env:AtlassianPowerKit_PROFILE_NAME-$JiraCloudProjectKey-IssueTypes-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
     if (-not (Test-Path $OUTPUT_PATH)) {
-        New-Item -ItemType Directory -Path $OUTPUT_PATH
+        New-Item -ItemType Directory -Path $OUTPUT_PATH -Force | Out-Null
     }
-    $OUTPUT_FILE = "$OUTPUT_PATH$FILENAME"
+    $OUTPUT_FILE = "$OUTPUT_PATH\$FILENAME"
     Write-Debug "Output file: $OUTPUT_FILE"
     # Initiate json file with { "Project": "$JiraCloudProjectKey", "JiraIssueTypes": [
     $OUTPUT_FILE_HEADER = "{ `"Project`": `"$JiraCloudProjectKey`", `"JiraIssueTypes`": ["
@@ -1203,7 +1121,7 @@ function Set-IssueLinkTypeByJQL {
                     Write-Debug "Issue Key: $($THIS_ISSUE.key) - Link Type Name: $($_.type.name), no new link type specified, just removing..."
                 }
                 # Write-Debug "New was created: $($NEW_LINK | ConvertTo-Json -Depth 10)"
-                write-Debug '#################################################################'
+                Write-Debug '#################################################################'
                 $CURRNT_LINK_FULL = Invoke-RestMethod -Uri $($CURRNT_HALF_LINK.self) -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
                 Write-Debug "Removing link: $($CURRNT_LINK_FULL.type.name) [$($CURRNT_LINK_FULL.id)] from $($CURRNT_LINK_FULL.inwardIssue.key) to $($CURRNT_LINK_FULL.outwardIssue.key)"
                 try {
@@ -1214,7 +1132,7 @@ function Set-IssueLinkTypeByJQL {
                     Write-Error "Error updating field: $($_.Exception.Message)"
                 }
                 Write-Debug "Link removed: [type = $($CURRNT_LINK_FULL.type.name)] from $($CURRNT_LINK_FULL.inwardIssue.key) to $($CURRNT_LINK_FULL.outwardIssue.key)"
-                write-Debug '#################################################################'
+                Write-Debug '#################################################################'
             }
         }
     }
