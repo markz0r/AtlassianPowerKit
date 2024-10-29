@@ -212,7 +212,8 @@ function Set-AtlassianPowerKitProfile {
         $env:AtlassianPowerKit_CloudID = $(Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/_edge/tenant_info").cloudId
         Write-Debug "Profile $SelectedProfileName loaded successfully."
     }
-    return $SelectedProfileName
+    $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile
+    return $LOADED_PROFILE
 }
 
 function Register-AtlassianPowerKitVault {

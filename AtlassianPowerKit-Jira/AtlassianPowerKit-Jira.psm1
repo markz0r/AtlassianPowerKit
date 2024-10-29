@@ -379,6 +379,45 @@ function Get-JiraIssueLinks {
     return $ISSUE_LINKS_JSON_ARRAY
 }
 
+function Clear-EmptyFields {
+    param (
+        [Parameter(Mandatory = $true)]
+        [psobject]$Object
+    )
+
+    if ($Object -is [System.Management.Automation.PSCustomObject]) {
+        # Process hashtable or custom object
+        $Object.psobject.properties | ForEach-Object {
+            if ($null -eq $_.Value -or $_.Value -eq '' -or ($_.Value -is [System.Collections.ICollection] -and $_.Value.Count -eq 0)) {
+                $Object.psobject.properties.Remove($_.Name)
+            }
+            else {
+                # Recursively clean nested objects
+                $_.Value = Clear-EmptyFields -Object $_.Value
+            }
+        }
+    } 
+    elseif ($Object -is [System.Collections.IDictionary]) {
+        # Process dictionary
+        $keys = @($Object.Keys)
+        foreach ($key in $keys) {
+            if ($null -eq $Object[$key] -or $Object[$key] -eq '' -or ($Object[$key] -is [System.Collections.ICollection] -and $Object[$key].Count -eq 0)) {
+                $Object.Remove($key)
+            }
+            else {
+                # Recursively clean nested objects
+                $Object[$key] = Clear-EmptyFields -Object $Object[$key]
+            }
+        }
+    }
+    elseif ($Object -is [System.Collections.IEnumerable] -and $Object -isnot [string]) {
+        # Process arrays/lists
+        $Object = $Object | ForEach-Object { Clear-EmptyFields -Object $_ } | Where-Object { $_ -ne $null }
+    }
+
+    return $Object
+}
+
 # Function to return JQL query results as a PowerShell object that includes a loop to ensure all results are returned even if the
 # number of results exceeds the maximum number of results returned by the Jira Cloud API
 function Get-JiraCloudJQLQueryResult {
@@ -386,7 +425,9 @@ function Get-JiraCloudJQLQueryResult {
         [Parameter(Mandatory = $true)]
         [string]$JQL_STRING,
         [Parameter(Mandatory = $false)]
-        [string[]]$RETURN_FIELDS
+        [string[]]$RETURN_FIELDS,
+        [Parameter(Mandatory = $false)]
+        [switch]$IncludeEmptyFields = $false
     )
     $OUTPUT_DIR = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA\$($env:AtlassianPowerKit_PROFILE_NAME)"
     $OUTPUT_FILE = "$OUTPUT_DIR\JIRA-Query-Results-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
@@ -415,7 +456,7 @@ function Get-JiraCloudJQLQueryResult {
             return
         }
     }
-    $POST_BODY.expand = @('names', 'renderedFields') 
+    $POST_BODY.expand = @('names') 
     $POST_BODY.remove('startAt')
     $POST_BODY.maxResults = 100
     if ($RETURN_FIELDS -and $null -ne $RETURN_FIELDS -and $RETURN_FIELDS.Count -gt 0) {
@@ -429,12 +470,41 @@ function Get-JiraCloudJQLQueryResult {
     # Set contents of $OUTPUT_FILE '[
     #'[' | Out-File -FilePath $OUTPUT_FILE
     $OUTPUT_FILE_LIST = 0..($DYN_LIMIT / 100) | ForEach-Object -Parallel { 
-        $PARTIAL_OUTPUT_FILE = ($using:OUTPUT_FILE).Replace('.json', "_$_.json")
-        $REST_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body $(@{startAt = ($_ * 100) } + $using:POST_BODY | ConvertTo-Json -Depth 30) -ContentType 'application/json'
-        $REST_RESPONSE.issues | ConvertTo-Json -Depth 100 -Compress | Out-File -FilePath $PARTIAL_OUTPUT_FILE -Append
-            
-        return $PARTIAL_OUTPUT_FILE
+        try {
+            $PARTIAL_OUTPUT_FILE = ($using:OUTPUT_FILE).Replace('.json', "_$_.json")
+            $REST_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body $(@{startAt = ($_ * 100) } + $using:POST_BODY | ConvertTo-Json -Depth 10) -ContentType 'application/json'
+            $REST_RESPONSE.issues | ConvertTo-Json -Depth 100 -Compress | Out-File -FilePath $PARTIAL_OUTPUT_FILE
+            return $PARTIAL_OUTPUT_FILE
+        }
+        catch {
+            Write-Error "Error processing page PAGE_NUMBER: $_"
+            return $null
+        }
     } -AsJob -ThrottleLimit 5 | Receive-Job -AutoRemoveJob -Wait 
+    $COMBINED_ISSUES = @()
+    if (!$IncludeEmptyFields) {
+        $COMBINED_ISSUES = $OUTPUT_FILE_LIST | ForEach-Object {
+            $PARTIAL_OUTPUT_FILE = $_
+            $JSON_CONTENT = Get-Content -Path $PARTIAL_OUTPUT_FILE
+            $CLEAN_ISSUES = $JSON_CONTENT | ConvertFrom-Json | ForEach-Object {
+                $ISSUE = $_
+                Write-Debug "Processing issue: $($ISSUE.key)"
+                $FIELDS_ARRAY = $_.fields
+                Write-Debug "FIELDS ARRAY TYPE IS: $($FIELDS_ARRAY.GetType())"
+                Write-Debug "FIELD COUNT FOR ISSUE: $($FIELDS_ARRAY.Count)"
+                $CLEAN_FIELD_ARRAY = Clear-EmptyFields -Object $FIELDS_ARRAY
+                # Replace the fields array with the cleaned fields array in the issue object
+                $ISSUE.fields = $CLEAN_FIELD_ARRAY
+                return $ISSUE
+            }
+            return $CLEAN_ISSUES 
+        }
+    }
+    else {
+        $COMBINED_ISSUES = $OUTPUT_FILE_LIST | Get-Content | ConvertFrom-Json
+    }
+    $COMBINED_ISSUES | ConvertTo-Json -Depth 100 -Compress | Out-File -FilePath $OUTPUT_FILE
+    Write-Debug "JIRA COMBINED Query results written to: $OUTPUT_FILE"
     #Write-Debug '########## Get-JiraCloudJQLQueryResult completed, OUTPUT_FILE_LIST: '
     #$OUTPUT_FILE_LIST | Write-Debug
     # Combine raw, compressed JSON files into a single JSON file that is valid JSON
@@ -674,6 +744,81 @@ function Get-JiraIssueChangeNulls {
     $FINAL_ITEMS
 }
 
+# Function to list statuses for a Jira Cloud instance
+function Get-JiraStatuses {
+    param (
+        [Parameter(Mandatory = $false)]
+        [switch]$WriteOutput = $false
+    )
+    $REST_RESULTS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/status" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+    if ($WriteOutput) {
+        $OUTPUT_FILE = "$env:OSM_HOME\$env:AtlassianPowerKit_PROFILE_NAME\JIRA\$env:AtlassianPowerKit_PROFILE_NAME-JIRAStatuses-$(Get-Date -Format 'yyyyMMdd-HHmmss').xlsx"
+        if (-not (Test-Path $OUTPUT_FILE)) {
+            New-Item -ItemType File -Path $OUTPUT_FILE -Force | Out-Null
+        }
+        # Write the $($_.name), $($_.id), $($_.description), $($_.self), "$($_.statusCategory.name)","$($_.statusCategory.id) for each status to the XLSX file and format as a table
+        
+    }
+    else {
+        return $REST_RESULTS
+    }
+}
+
+# Get-JiraActiveWorkflows
+function Get-JiraActiveWorkflows {
+    $WORKFLOW_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/workflow/search?isActive=true&expand=statuses"
+    Write-Debug "Workflow Endpoint: $WORKFLOW_ENDPOINT"
+    Invoke-RestMethod -Uri $WORKFLOW_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json' -Verbose -Debug
+    $WORKFLOWS = Invoke-RestMethod -Uri $WORKFLOW_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json' -Verbose -Debug
+    $RESULT_ITEMS = $WORKFLOWS.values
+
+    $DUPLICATE_FIELD_NAMES = Get-DuplicateJiraFieldNames
+
+    $CSV_DATA = @()
+    $CSV_DATA += 'Workflow Name, Description, Statuses, Created, Updated, AmbiguousDup'
+
+    $RESULT_ITEMS | ForEach-Object {
+        $WORKFLOW = $_
+        Write-Debug "Workflow: $($WORKFLOW.id.name)"
+        $AMIBIGUOUS_FIELDS = ''
+        foreach ($STATUS in $WORKFLOW.statuses) {
+            Write-Debug "Status: $($STATUS.name)"
+            $AMIBIGUOUS_FIELDS += $DUPLICATE_FIELD_NAMES | Where-Object { $STATUS.name -eq $_ }
+        }
+        if ($AMIBIGUOUS_FIELDS) {
+            $AMIBIGUOUS_FIELDS = $AMIBIGUOUS_FIELDS -join ', '
+            $WORKFLOW | Add-Member -MemberType NoteProperty -Name 'AmbiguousDup' -Value $AMIBIGUOUS_FIELDS
+        }
+        else {
+            $WORKFLOW | Add-Member -MemberType NoteProperty -Name 'AmbiguousDup' -Value 'No'
+        }
+        $OUTPUT_FILE = "$env:OSM_HOME\$env:AtlassianPowerKit_PROFILE_NAME\JIRA\$env:AtlassianPowerKit_PROFILE_NAME-JIRAWorkflows-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+        if (-not (Test-Path $OUTPUT_FILE)) {
+            New-Item -ItemType File -Path $OUTPUT_FILE -Force | Out-Null
+        }
+        $CSV_DATA += "$($WORKFLOW.id.name), $($WORKFLOW.description),$($WORKFLOW.statuses | ConvertTo-Csv -UseQuotes Never -Delimiter '-' -NoHeader)"
+            
+    }
+    $CSV_DATA | Out-File -FilePath $OUTPUT_FILE
+    Write-Debug "Jira Workflows written to: $OUTPUT_FILE"
+    return $true
+}
+
+function Get-JiraFieldDups {
+    $JIRA_FIELDS = Get-JiraFields
+    $JIRA_FIELD_NAMES = @()
+    $DUPLICATE_FIELD_NAMES = @()
+    $JIRA_FIELDS | ForEach-Object {
+        if ($JIRA_FIELD_NAMES -contains $_.name) {
+            $DUPLICATE_FIELD_NAMES += $_.name
+        }
+        else {
+            $JIRA_FIELD_NAMES += $_.name
+        }
+    }
+    return $DUPLICATE_FIELD_NAMES
+}
+
 # Function to list fields with field ID and field name for a Jira Cloud instance
 function Get-JiraFields {
     param (
@@ -681,18 +826,38 @@ function Get-JiraFields {
         [switch]$WriteOutput = $false
     )
     $REST_RESULTS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/field" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
-    #Write-Debug $REST_RESULTS.getType()
-    #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
-    # Write a file with the results to $env:AtlantisPowerKit_PROFILE_NAME-JIRAFields-YYYYMMDD-HHMMSS.json
     if ($WriteOutput) {
-        $OUTPUT_FILE = "$env:AtlassianPowerKit_PROFILE_NAME\$env:AtlassianPowerKit_PROFILE_NAME-JIRAFields-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+        $OUTPUT_FILE = "$env:OSM_HOME\$env:AtlassianPowerKit_PROFILE_NAME\JIRA\$env:AtlassianPowerKit_PROFILE_NAME-JIRAFields-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
         if (-not (Test-Path $OUTPUT_FILE)) {
-            New-Item -ItemType File -Path $OUTPUT_FILE
+            New-Item -ItemType File -Path $OUTPUT_FILE -Force | Out-Null
         }
-        $REST_RESULTS | ConvertTo-Json -Depth 10 | Out-File -FilePath $OUTPUT_FILE
+        $CSV_DATA = @()
+        $CSV_DATA += 'Field Name, Field ID, Custom, ClauseName, schema'
+        $REST_RESULTS | ForEach-Object {
+            $CSV_DATA += "$($_.name), $($_.id), $($_.custom), $($_.clauseNames), $($_.schema)"
+        }
+        $CSV_DATA | Out-File -FilePath $OUTPUT_FILE
+        #$REST_RESULTS | ConvertTo-Json -Depth 10 | Out-File -FilePath $OUTPUT_FILE
+        # Write results to a CSV file
         Write-Debug "Jira Fields written to: $OUTPUT_FILE"
     }
     return $REST_RESULTS
+}
+
+# Function to return list of duplicate Jira Field names
+function Get-DuplicateJiraFieldNames {
+    $JIRA_FIELDS = Get-JiraFields
+    $JIRA_FIELD_NAMES = @()
+    $DUPLICATE_FIELD_NAMES = @()
+    $JIRA_FIELDS | ForEach-Object {
+        if ($JIRA_FIELD_NAMES -contains $_.name) {
+            $DUPLICATE_FIELD_NAMES += $_.name
+        }
+        else {
+            $JIRA_FIELD_NAMES += $_.name
+        }
+    }
+    return $DUPLICATE_FIELD_NAMES
 }
 
 # Function to list all users for a JSM cloud project

@@ -63,8 +63,6 @@ function Invoke-AtlassianPowerKitFunction {
         [Parameter(Mandatory = $true)]
         [string] $FunctionName,
         [Parameter(Mandatory = $false)]
-        [string] $SelectedProfileName,
-        [Parameter(Mandatory = $false)]
         [hashtable] $FunctionParameters
     )
     $TEMP_DIR = "$env:OSM_HOME\$env:AtlassianPowerKit_PROFILE_NAME\.temp"
@@ -73,24 +71,11 @@ function Invoke-AtlassianPowerKitFunction {
     }
     $TIMESTAMP = Get-Date -Format 'yyyyMMdd-HHmmss'
     $LOG_FILE = "$TEMP_DIR\$FunctionName-$TIMESTAMP.log"
-    if ($Profile) {
-        if (!(Get-CurrentAtlassianPowerKitProfile)) {
-            $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $SelectedProfileName
-        } 
-        else {
-            $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile
-            # Test if a profile is loaded, if not, ask the user to select a profile
-        }
-    } 
-    if (!$LOADED_PROFILE) {
-        Write-Error "Profile $SelectedProfileName not found. Exiting."
-        throw "Profile $SelectedProfileName not found. Exiting."
-    }
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $stopwatch.Start()
     if ($FunctionParameters) {
-            Write-Debug "Running function: $FunctionName with parameters: $($FunctionParameters | Out-String)"
-            & $FunctionName @FunctionParameters
+        Write-Debug "Running function: $FunctionName with parameters: $($FunctionParameters | Out-String)"
+        & $FunctionName @FunctionParameters
     }
     else {
         Invoke-Expression "$FunctionName" 
@@ -134,9 +119,7 @@ function Get-RequisitePowerKitModules {
         finally {
             Import-Module -Name $_ -Force
         }
-        Import-NestedModules
     }
-
 }
 # Function display console interface to run any function in the module
 function Show-AtlassianPowerKitFunctions {
@@ -315,6 +298,7 @@ function AtlassianPowerKit {
         [Parameter(Mandatory = $false)]
         [hashtable] $FunctionParameterHashTable
     )
+    Import-NestedModules
     try {
         #Push-Location -Path $PSScriptRoot -ErrorAction Continue
         Write-Debug "Starting AtlassianPowerKit, running from $((Get-Item -Path $PSScriptRoot).FullName)"
@@ -329,50 +313,64 @@ function AtlassianPowerKit {
             Clear-AtlassianPowerKitProfileDirs
             return $null
         }
-        if (!$Profile) {
+    }
+    catch {
+        Write-Error 'AtlassianPowerKit Main: Error initializing AtlassianPowerKit. Exiting.'
+        throw 'AtlassianPowerKit Main: Error initializing AtlassianPowerKit. Exiting.'
+    }
+    try {
+        # If no profile name is provided, list the available profiles
+        $ProfileName = $null
+        if ($Profile) {
+            $ProfileName = $Profile.Trim().ToLower()
+        }
+        else {
+            $ProfileName = $(Get-CurrentAtlassianPowerKitProfile)
+            Write-Debug "Profile already loaded: $ProfileName"
+        }
+        if (!$ProfileName) {
             if (!$FunctionName) {
-                Write-Host 'No profile name provided. Check the profiles available.'
+                Write-Host 'No profile name provided or currently loaded... listing options.'
                 try {
-                    $InputProfileName = Show-AtlassianPowerKitProfileList
+                    $ProfileName = $(Show-AtlassianPowerKitProfileList)
                 }
                 catch {
-                    Write-Host 'No profile selected. Exiting...'
-                    return $null
+                    Write-Error 'AtlassianPowerKit Main: No profile selected. Exiting...'
+                    throw 'AtlassianPowerKit Main: No profile selected. Exiting...' 
                 }
             }
             else {
                 Write-Debug "Example: AtlassianPowerKit -ProfileName 'profileName' -FunctionName 'functionName' -FunctionParameterHashTable @{parameter1='value1';parameter='value2'}"
-                Write-Error 'No -ProfileName provided with FunctionName, Exiting...'
+                Write-Error 'AtlassianPowerKit Main: No -ProfileName provided with FunctionName, Exiting...'
             }
         } 
-        $InputProfileName = $Profile.Trim().ToLower()
-        Set-AtlassianPowerKitProfile -SelectedProfileName $InputProfileName
+        $ProfileName = Set-AtlassianPowerKitProfile -SelectedProfileName $ProfileName
         if (!$FunctionName) {
             Show-AtlassianPowerKitFunctions
         }
         else {
             # If function parameters are provided, splat them to the function
-            Write-Debug "Running function: $FunctionName, with profile: $InputProfileName and parameters:"
+            Write-Debug "AtlassianPowerKit Main - Running function: $FunctionName, with profile: $ProfileName and parameters:"
             if ($FunctionParameterHashTable) {
                 # Iterate through the hashtable and display the key value pairs as "-key value"
                 $FunctionParameterHashTable.GetEnumerator() | ForEach-Object {
                     Write-Debug "-$($_.Key) $_.Value"
                 }
-                Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName -SelectedProfileName $InputProfileName -FunctionParameters $FunctionParameterHashTable
+                Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName -FunctionParameters $FunctionParameterHashTable
             }
             else {
-                Write-Debug 'No parameters provided to the function, attempting to run the function without parameters.'
-                Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName -SelectedProfileName $InputProfileName
+                Write-Debug 'AtlassianPowerKit Main: No parameters provided to the function, attempting to run the function without parameters.'
+                Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName
             }
 
         }
     }
     catch {
         # Write call stack and sub-function error messages to the debug output
-        Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+        Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ AtlassianPowerKit Main: '
         # Write full call stack to the debug output and error message to the console
         Get-PSCallStack
-        Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++'
+        Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ AtlassianPowerKit Main: '
         Write-Error $_.Exception.Message
     }
     finally {
