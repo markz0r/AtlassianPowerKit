@@ -62,7 +62,7 @@ function Test-OSMHomeDir {
     # Check the OSM_HOME environment variable directory exists
     if (-not (Test-Path $env:OSM_HOME)) {
         Write-Warning "OSM_HOME directory not found: $env:OSM_HOME"
-        Write-Warn "Changing OSM_HOME to $new_home"
+        Write-Warning "Changing OSM_HOME to $new_home"
         $env:OSM_HOME = $new_home
     }
     if ($env:OSM_HOME -ne $new_home) {
