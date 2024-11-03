@@ -66,42 +66,35 @@
     # FormatsToProcess = @()
 
     # Modules to import as nested modules of the module specified in RootModule/ModuleToProcess
-    NestedModules     = @('..\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1')
+    # NestedModules     = @('..\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1')
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
     FunctionsToExport = @(
-        'Get-JiraFilterResults',
-        'Set-LoadedProfileJira',
-        'Export-JiraCloudJQLQueryResultsToJSON',
-        'Get-JSONFieldsWithData',
+        'Clear-JiraProjectProperty',
         'Get-JiraActiveWorkflows',
         'Get-JiraCloudIssueTypeMetadata',
         'Get-JiraCloudJQLQueryResult',
-        'Get-JiraStatuses',
-        'Get-JiraFields',
         'Get-JiraFieldDups',
+        'Get-JiraFields',
+        'Get-JiraFilterResultsAsConfluenceTable',
+        'Get-JiraOSMFilterList',
+        'Get-JiraIssue',
         'Get-JiraIssueChangeNullsFromJQL',
-        'Get-JiraProjectIssuesTypes',
+        'Get-JiraIssueLinks',
+        'Get-JiraProjectList',
         'Get-JiraProjectProperties',
         'Get-JiraProjectProperty',
+        'Get-JiraProjectIssuesTypes',
+        'Get-JiraStatuses',
         'Get-JSMService',
         'Get-JSMServices',
-        'Get-OpsgenieServices',
-        'Clear-JiraProjectProperty',
-        'Remove-RemoteIssueLink',
-        'Set-JiraCloudAPIEndpoint',
-        'Set-JiraCustomField',
-        'Set-JiraIssueFieldForJQLQueryResults',
-        'Set-JiraIssueField',
-        'Set-JiraProjectProperty',
-        'Get-OSMPlaceholdersJira',
-        'Get-JiraIssueLinks',
-        'Set-SSGRequirementFields',
+        'Get-JSONFieldsWithData',
         'Remove-FormsFromJQLQueryResults',
+        'Remove-RemoteIssueLink',
         'Set-IssueLinkTypeByJQL',
-        'Get-JiraFilterResultsAsConfluenceTable',
-        'Get-JiraIssue',
-        'ParseJIRAIssueJSONForConfluence'
+        'Set-JiraIssueField',
+        'Set-JiraIssueFieldForJQLQueryResults',
+        'Set-JiraProjectProperty'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.

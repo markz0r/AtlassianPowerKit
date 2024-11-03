@@ -34,8 +34,174 @@ GitHub: https://github.com/markz0r/AtlassianPowerKit
 
 # Vault path: $env:LOCALAPPDATA\Microsoft\PowerShell\secretmanagement\localstore\
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-$script:VAULT_NAME = 'AtlassianPowerKitProfileVault'
+$VAULT_NAME = 'AtlassianPowerKitProfileVault'
 $VAULT_KEY_PATH = 'vault_key.xml'
+
+function Get-RequisitePowerKitModules {
+    $AtlassianPowerKitRequiredModules = @('PowerShellGet', 'Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
+    $AtlassianPowerKitRequiredModules | ForEach-Object {
+        # Import or install the required module
+        if (-not (Get-Module -Name $_ -ErrorAction Continue)) {
+            try {
+                if (-not (Get-Module -Name $_ -ListAvailable)) {
+                    Write-Debug "Module $_ not found. Installing..."
+                    Install-Module -Name $_ -Force -Scope CurrentUser | Write-Debug
+                }            
+            }
+            catch {
+                Write-Error "Module $_ not found and installation failed. Exiting."
+                throw "Dependency module $_ unanable to install, try manual install, Exiting for now."
+            }
+            Import-Module -Name $_ -Force | Write-Debug
+        }
+    }
+    return $true
+}
+function Clear-AtlassianPowerKitProfile {
+    # Clear all environment variables starting with AtlassianPowerKit_
+    Get-ChildItem env:AtlassianPowerKit_* | ForEach-Object {
+        Write-Debug "Removing environment variable: $_"
+        Remove-Item "env:$($_.Name)" -ErrorAction Continue
+    }
+}
+
+# Function to iterate through profile directories and clear contents by 
+function Clear-AtlassianPowerKitProfileDirs {
+    $PROFILE_DIRS = Get-AtlassianPowerKitProfileList | Get-Item
+    $EXCLUDED_BACKUP_PATTERNS = @('*.zip')
+    $EXCLUDED_DELETE_PATTERNS = @('*.zip', '*.md', '*.dotx', '*pdf', '*.doc', '*.docx', '*templates', '*ARCHIVE')
+    # Get all subdirectories in the AtlassianPowerKit profile directory that dont match $EXCLUDED_FILENAME_PATTERNS
+    foreach ($dir in $PROFILE_DIRS) {
+        $ARCHIVE_NAME = "$($dir.BaseName)_ARCHIVE_$(Get-Date -Format 'yyyyMMdd').zip"
+        $ARCHIVE_PATH = Join-Path -Path $dir.FullName -ChildPath $ARCHIVE_NAME
+
+        # Collecting items excluding the patterns
+        $itemsToArchive = Get-ChildItem -Path $dir.FullName -Recurse -File -Exclude $EXCLUDED_BACKUP_PATTERNS
+        Write-Debug "Items to archive: $($itemsToArchive.FullName) ..."
+
+        if ($itemsToArchive.Count -eq 0) {
+            Write-Debug "Profile directory $dir. FullName has nothing to archive. Skipping..."
+        }
+        else {
+            # Archiving items
+            Compress-Archive -Path $itemsToArchive.FullName -DestinationPath $ARCHIVE_PATH -Force
+            Write-Debug "Archiving $($dir.BaseName) to $ARCHIVE_NAME in $($dir.FullName)...."
+            # Delete any directories with no files or subdirectories
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory | Where-Object { $_.GetFileSystemInfos().Count -eq 0 } | Remove-Item -Force
+            # Write-Debug "Profile directory $dir.FullName cleared and archived to $ARCHIVE_NAME."
+        }
+        Get-ChildItem -Path $dir.FullName -Recurse -File -Exclude $EXCLUDED_DELETE_PATTERNS | Remove-Item -Force
+        Get-ChildItem -Path $dir.FullName -Recurse -Directory -Exclude $EXCLUDED_DELETE_PATTERNS | Remove-Item -Force
+    }
+    # Optionally, clear the directory after archiving
+    Write-Debug 'Profile directories cleared.'
+}
+
+function Clear-AtlassianPowerKitVault {
+    Unregister-SecretVault -Name $script:VAULT_NAME
+    Write-Debug "Vault $script:VAULT_NAME cleared."
+    $VAULT_KEY = Get-VaultKey
+    $storeConfiguration = @{
+        Authentication  = 'Password'
+        Password        = $VAULT_KEY
+        PasswordTimeout = 3600
+        Interaction     = 'None'
+    }
+    Reset-SecretStore @storeConfiguration -Force
+    Clear-AtlassianPowerKitProfile
+}
+
+# Function to check if a profile is already loaded
+function Get-CurrentAtlassianPowerKitProfile {
+    if ($env:AtlassianPowerKit_PROFILE_NAME -and $env:AtlassianPowerKit_CloudID) {
+        Write-Debug "Profile $($env:AtlassianPowerKit_PROFILE_NAME) appears loaded..."
+        #Write-Debug "Profile $($env:AtlassianPowerKit_PROFILE_NAME) is loaded."
+        return $env:AtlassianPowerKit_PROFILE_NAME
+    }
+    else {
+        Write-Debug 'No profile loaded.'
+        return $false
+    }
+}
+
+function Get-AtlassianPowerKitProfileList {
+    Write-Debug 'Getting AtlassianPowerKit Profile List...'
+    if (!$(Get-SecretVault -Name $script:VAULT_NAME -ErrorAction SilentlyContinue)) {
+        Register-AtlassianPowerKitVault
+    }
+    else {
+        Write-Debug 'Vault already registered, getting profiles...'
+        unlock-vault -VaultName $script:VAULT_NAME
+        $PROFILE_LIST = (Get-SecretInfo -Vault $script:VAULT_NAME -Name '*').Name
+        if ($PROFILE_LIST.Count -eq 0) {
+            Write-Debug 'No profiles found. Please create a new profile.'
+            return $false
+        }
+    }
+    $env:AtlassianPowerKit_PROFILE_LIST_STRING = $PROFILE_LIST
+    Write-Debug "Profiles found: $($env:AtlassianPowerKit_PROFILE_LIST_STRING)"
+    return $PROFILE_LIST
+}
+
+function Get-LevenshteinDistance {
+    param (
+        [string]$s,
+        [string]$t
+    )
+
+    if ($s.Length -eq 0) { return $t.Length }
+    if ($t.Length -eq 0) { return $s.Length }
+
+    $d = @()
+    for ($i = 0; $i -le $s.Length; $i++) {
+        $d += , @(0..$t.Length)
+    }
+
+    for ($i = 0; $i -le $s.Length; $i++) { $d[$i][0] = $i }
+    for ($j = 0; $j -le $t.Length; $j++) { $d[0][$j] = $j }
+
+    for ($i = 1; $i -le $s.Length; $i++) {
+        for ($j = 1; $j -le $t.Length; $j++) {
+            $cost = if ($s[$i - 1] -eq $t[$j - 1]) { 0 } else { 1 }
+            $d[$i][$j] = [math]::Min([math]::Min($d[$i - 1][$j] + 1, $d[$i][$j - 1] + 1), $d[$i - 1][$j - 1] + $cost)
+        }
+    }
+
+    return $d[$s.Length][$t.Length]
+}
+
+# Function Update-ContentPlaceholderAll, takes a file path and a hashtable of placeholders and values, returning the content with the placeholders replaced (not updating the file)
+function Get-PopulatedTemplate {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$TemplateFilePath,
+        [Parameter(Mandatory = $false)]
+        [string[]]$InputJSON,
+        [Parameter(Mandatory = $false)]
+        [string[]]$InputConfStorageString
+    )
+    # If neither JSON or ConfStorageString is provided error
+    if (-not $InputJSON -and -not $InputConfStorageString) {
+        Write-Debug 'No InputJSON or InputConfStorageString provided to , one is required. Exiting...'
+        Write-Error 'Get-PopulatedTemplate failed. Exiting...'
+        return $false
+    }
+    $TemplateContent = Get-Content -Path $TemplateFilePath -Raw | ConvertFrom-Json -Depth 20
+    foreach ($item in $TemplateContent.placeholderMap) {
+        foreach ($key in $item.Keys) {
+            $value = $item[$key]
+            $valueDataType = $value.GetType().Name
+
+            # Handle different types of values
+            if ($value -is [System.Collections.IEnumerable] -and -not ($value -is [string])) {
+                $value = $value -join ', '
+            }
+
+            Write-Host "Key: $key, ValueDataType: $valueDataType, Value: $value"
+        }
+    }
+    return $Content
+}
 
 function Get-VaultKey {
     if (-not (Test-Path $VAULT_KEY_PATH)) {
@@ -44,176 +210,6 @@ function Get-VaultKey {
     }
     $VAULT_KEY = Import-Clixml -Path $VAULT_KEY_PATH
     return $VAULT_KEY
-}
-
-function Unlock-Vault {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$VaultName
-    )
-    try {
-        if ((Get-SecretVault | Where-Object IsDefault).Name -ne $script:VAULT_NAME) {
-            Write-Debug "$script:VAULT_NAME is not the default vault. Setting as default..."
-            Set-SecretVaultDefault -Name $script:VAULT_NAME
-        }
-        # Attempt to get a non-existent secret. If the vault is locked, this will throw an error.
-        $VAULT_KEY = Get-VaultKey
-        Unlock-SecretStore -Password $VAULT_KEY
-    }
-    catch {
-        # If an error is thrown, the vault is locked.
-        Write-Debug "Unlock-Vault failed: $_ ..."
-        throw 'Unlock-Vault failed Exiting'
-    }
-    # If no error is thrown, the vault is unlocked.
-    Write-Debug 'Vault is unlocked.'
-}
-
-# Function to test if AtlassianPowerKit profile authenticates successfully
-function Test-AtlassianPowerKitProfile {
-    Write-Debug 'Testing Atlassian Cloud PowerKit Profile...'
-    #Write-Debug "API Headers: $($script:AtlassianAPIHeaders | Format-List * | Out-String)"
-    Write-Debug "API Endpoint: $($env:AtlassianPowerKit_AtlassianAPIEndpoint) ..."
-    Write-Debug "API Headers: $($env:AtlassianPowerKit_AtlassianAPIHeaders) ..."
-    $HEADERS = ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders
-    $TEST_ENDPOINT = 'https://' + $env:AtlassianPowerKit_AtlassianAPIEndpoint + '/rest/api/2/myself'
-    try {
-        Write-Debug "Running: Invoke-RestMethod -Uri https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/myself -Headers $($env:AtlassianPowerKit_AtlassianAPIHeaders | ConvertFrom-Json -AsHashtable) -Method Get"
-        Invoke-RestMethod -Method Get -Uri $TEST_ENDPOINT -Headers $HEADERS | Write-Debug
-        #Write-Debug "Results: $($REST_RESULTS | ConvertTo-Json -Depth 10) ..."
-        Write-Debug 'Donennnne'
-    }
-    catch {
-        Write-Debug "Error: $_ ..."
-        throw 'Atlassian Cloud API Auth test failed.'
-    }
-    Write-Debug "Atlassian Cloud Auth test returned: $($REST_RESULTS.displayName) --- OK!"
-
-    # Test Opsgenie API if profile uses Opsgenie API
-    if ($env:AtlassianPowerKit_UseOpsgenieAPI) {
-        try {
-            Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_OpsgenieAPIEndpoint)/v1/services?limit=1" -Headers $($env:AtlassianPowerKit_OpsgenieAPIHeaders | ConvertFrom-Json -AsHashtable) -Method Get
-            #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
-        }
-        catch {
-            Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
-            Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
-            throw 'Opsgenie API Auth test failed.'
-        }
-        Write-Debug 'Opsgenie Auth test --- OK!'
-    }
-}
-
-# Funtion to set the Opsgenie API endpoint and headers
-# function Set-OpsgenieAPIHeaders {
-#     # check if there is a profile loaded
-#     if (!$env:AtlassianPowerKit_PROFILE_NAME) {
-#         Write-Debug 'No profile loaded. Please load a profile first.'
-#         return $false
-#     }
-#     elseif (-not $env:AtlassianPowerKit_UseOpsgenieAPI) {
-#         Write-Debug 'Profile does not use Opsgenie API, setting defaults'
-#         $HEADERS = @{
-#             Authorization = "Basic $($env:AtlassianPowerKit_AtlassianAPIAuthString)"
-#             Accept        = 'application/json'
-#         }
-#     }
-#     else {
-#         $HEADERS = @{
-#             Authorization = "Basic $($env:AtlassianPowerKit_OpsgenieAPIAuthString)"
-#             Accept        = 'application/json'
-#         }
-#     }
-#     $env:AtlassianPowerKit_OpsgenieAPIHeaders = $HEADERS | ConvertTo-Json
-#     Write-Debug "Opsgenie headers set for $($env:AtlassianPowerKit_PROFILE_NAME)."
-#     Write-Debug "Headers are: $($env:AtlassianPowerKit_OpsgenieAPIHeaders)"
-#     Write-Debug "Opsgenie Profile Loaded for: $($env:AtlassianPowerKit_PROFILE_NAME)"
-# }
-
-# Function to set the Atlassian Cloud API headers
-function Set-AtlassianAPIHeaders {
-    # check if there is a profile loaded
-    if (!$env:AtlassianPowerKit_PROFILE_NAME) {
-        Write-Debug 'No profile loaded. Please load a profile first.'
-        return $false
-    }
-    else {
-        Write-Debug "Profile $ProfileName loaded. Setting API headers and AtlassianAPIEndpoint..."
-        $HEADERS = @{
-            Authorization = "Basic $($env:AtlassianPowerKit_AtlassianAPIAuthString)"
-            Accept        = 'application/json'
-        }
-        # Add atlassian headers to the profile data
-        $env:AtlassianPowerKit_AtlassianAPIHeaders = $HEADERS | ConvertTo-Json
-        Write-Debug "Atlassian headers set for $($env:AtlassianPowerKit_PROFILE_NAME)."
-        Write-Debug "Headers are: $($env:AtlassianPowerKit_AtlassianAPIHeaders)"
-        Test-AtlassianPowerKitProfile
-        Write-Debug "Atlassian headers set and tested successfully for $($env:AtlassianPowerKit_PROFILE_NAME)."
-    }
-}
-
-# Function to update the vault with the new profile data
-function Update-AtlassianPowerKitVault {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$ProfileName,
-        [Parameter(Mandatory = $true)]
-        [hashtable]$ProfileData
-    )
-    Write-Debug "Writing profile data to vault for $ProfileName..."
-    Unlock-Vault -VaultName $script:VAULT_NAME
-    try {
-        Set-Secret -Name $ProfileName -Secret $ProfileData -Vault $script:VAULT_NAME
-    } 
-    catch {
-        Write-Debug "Update of vault failed for $ProfileName."
-        throw "Update of vault failed for $ProfileName."
-    }
-    Write-Debug "Vault entruy for $ProfileName updated successfully."
-}
-
-function Set-AtlassianPowerKitProfile {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$SelectedProfileName
-    )
-    Write-Debug "Set-AtlassianPowerKitProfile - with: $SelectedProfileName ..."
-    # Load all profiles from the secret vault
-    if (!$(Get-SecretVault -Name $script:VAULT_NAME -ErrorAction SilentlyContinue)) {
-        Register-AtlassianPowerKitVault
-    }
-    # Check if the profile exists
-    $PROFILE_LIST = Get-AtlassianPowerKitProfileList
-    if (!$PROFILE_LIST.Contains($SelectedProfileName)) {
-        Write-Debug "Profile $SelectedProfileName does not exists in the vault - we have: $PROFILE_LIST"
-        return $false
-    }
-    else {
-        Write-Debug "Profile $SelectedProfileName exists in the vault, loading..."
-        try {
-            # if vault is locked, unlock it
-            Unlock-Vault -VaultName $script:VAULT_NAME
-            $PROFILE_DATA = (Get-Secret -Name $SelectedProfileName -Vault $script:VAULT_NAME -AsPlainText)
-            #Create environment variables for each item in the profile data
-            $PROFILE_DATA.GetEnumerator() | ForEach-Object {
-                Write-Debug "Setting environment variable: $($_.Key) = $($_.Value)"
-                # Create environment variable concatenated with AtlassianPowerKit_ prefix
-                $SetEnvar = '$env:AtlassianPowerKit_' + $_.Key + " = `"$($_.Value)`""
-                Invoke-Expression -Command $SetEnvar | Out-Null
-                Write-Debug "Environment variable set: $SetEnvar"
-            }
-        } 
-        catch {
-            Write-Debug "Failed to load profile $SelectedProfileName. Please check the vault key file."
-            throw "Failed to load profile $SelectedProfileName. Please check the vault key file."
-        }
-        Set-AtlassianAPIHeaders
-        #Set-OpsgenieAPIHeaders
-        $env:AtlassianPowerKit_CloudID = $(Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/_edge/tenant_info").cloudId
-        Write-Debug "Profile $SelectedProfileName loaded successfully."
-    }
-    $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile
-    return $LOADED_PROFILE
 }
 
 function Register-AtlassianPowerKitVault {
@@ -347,121 +343,147 @@ function Register-AtlassianPowerKitProfile {
     return $LOADED_PROFILE
 }
 
-function Clear-AtlassianPowerKitProfile {
-    # Clear all environment variables starting with AtlassianPowerKit_
-    Get-ChildItem env:AtlassianPowerKit_* | ForEach-Object {
-        Write-Debug "Removing environment variable: $_"
-        Remove-Item "env:$($_.Name)" -ErrorAction Continue
-    }
-}
-
-# Function to iterate through profile directories and clear contents by 
-function Clear-AtlassianPowerKitProfileDirs {
-    $PROFILE_DIRS = Get-AtlassianPowerKitProfileList | Get-Item
-    $EXCLUDED_BACKUP_PATTERNS = @('*.zip')
-    $EXCLUDED_DELETE_PATTERNS = @('*.zip', '*.md', '*.dotx', '*pdf', '*.doc', '*.docx', '*templates', '*ARCHIVE')
-    # Get all subdirectories in the AtlassianPowerKit profile directory that dont match $EXCLUDED_FILENAME_PATTERNS
-    foreach ($dir in $PROFILE_DIRS) {
-        $ARCHIVE_NAME = "$($dir.BaseName)_ARCHIVE_$(Get-Date -Format 'yyyyMMdd').zip"
-        $ARCHIVE_PATH = Join-Path -Path $dir.FullName -ChildPath $ARCHIVE_NAME
-
-        # Collecting items excluding the patterns
-        $itemsToArchive = Get-ChildItem -Path $dir.FullName -Recurse -File -Exclude $EXCLUDED_BACKUP_PATTERNS
-        Write-Debug "Items to archive: $($itemsToArchive.FullName) ..."
-
-        if ($itemsToArchive.Count -eq 0) {
-            Write-Debug "Profile directory $dir. FullName has nothing to archive. Skipping..."
-        }
-        else {
-            # Archiving items
-            Compress-Archive -Path $itemsToArchive.FullName -DestinationPath $ARCHIVE_PATH -Force
-            Write-Debug "Archiving $($dir.BaseName) to $ARCHIVE_NAME in $($dir.FullName)...."
-            # Delete any directories with no files or subdirectories
-            Get-ChildItem -Path $dir.FullName -Recurse -Directory | Where-Object { $_.GetFileSystemInfos().Count -eq 0 } | Remove-Item -Force
-            # Write-Debug "Profile directory $dir.FullName cleared and archived to $ARCHIVE_NAME."
-        }
-        Get-ChildItem -Path $dir.FullName -Recurse -File -Exclude $EXCLUDED_DELETE_PATTERNS | Remove-Item -Force
-        Get-ChildItem -Path $dir.FullName -Recurse -Directory -Exclude $EXCLUDED_DELETE_PATTERNS | Remove-Item -Force
-    }
-    # Optionally, clear the directory after archiving
-    Write-Debug 'Profile directories cleared.'
-}
-
-function Clear-AtlassianPowerKitVault {
-    Unregister-SecretVault -Name $script:VAULT_NAME
-    Write-Debug "Vault $script:VAULT_NAME cleared."
-    $VAULT_KEY = Get-VaultKey
-    $storeConfiguration = @{
-        Authentication  = 'Password'
-        Password        = $VAULT_KEY
-        PasswordTimeout = 3600
-        Interaction     = 'None'
-    }
-    Reset-SecretStore @storeConfiguration -Force
-    Clear-AtlassianPowerKitProfile
-}
-
-# Function to check if a profile is already loaded
-function Get-CurrentAtlassianPowerKitProfile {
-    if ($env:AtlassianPowerKit_PROFILE_NAME -and $env:AtlassianPowerKit_CloudID) {
-        Write-Debug "Profile $($env:AtlassianPowerKit_PROFILE_NAME) appears loaded..."
-        #Write-Debug "Profile $($env:AtlassianPowerKit_PROFILE_NAME) is loaded."
-        return $env:AtlassianPowerKit_PROFILE_NAME
-    }
-    else {
-        Write-Debug 'No profile loaded.'
+# Function to set the Atlassian Cloud API headers
+function Set-AtlassianAPIHeaders {
+    # check if there is a profile loaded
+    if (!$env:AtlassianPowerKit_PROFILE_NAME) {
+        Write-Debug 'No profile loaded. Please load a profile first.'
         return $false
     }
+    else {
+        Write-Debug "Profile $ProfileName loaded. Setting API headers and AtlassianAPIEndpoint..."
+        $HEADERS = @{
+            Authorization = "Basic $($env:AtlassianPowerKit_AtlassianAPIAuthString)"
+            Accept        = 'application/json'
+        }
+        # Add atlassian headers to the profile data
+        $env:AtlassianPowerKit_AtlassianAPIHeaders = $HEADERS | ConvertTo-Json
+        Write-Debug "Atlassian headers set for $($env:AtlassianPowerKit_PROFILE_NAME)."
+        Write-Debug "Headers are: $($env:AtlassianPowerKit_AtlassianAPIHeaders)"
+        Test-AtlassianPowerKitProfile
+        Write-Debug "Atlassian headers set and tested successfully for $($env:AtlassianPowerKit_PROFILE_NAME)."
+    }
 }
 
-function Get-AtlassianPowerKitProfileList {
-    Write-Debug 'Getting AtlassianPowerKit Profile List...'
+function Set-AtlassianPowerKitProfile {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$SelectedProfileName
+    )
+    Write-Debug "Set-AtlassianPowerKitProfile - with: $SelectedProfileName ..."
+    # Load all profiles from the secret vault
     if (!$(Get-SecretVault -Name $script:VAULT_NAME -ErrorAction SilentlyContinue)) {
         Register-AtlassianPowerKitVault
     }
-    else {
-        Write-Debug 'Vault already registered, getting profiles...'
-        unlock-vault -VaultName $script:VAULT_NAME
-        $PROFILE_LIST = (Get-SecretInfo -Vault $script:VAULT_NAME -Name '*').Name
-        if ($PROFILE_LIST.Count -eq 0) {
-            Write-Debug 'No profiles found. Please create a new profile.'
-            return $false
-        }
-    }
-    $env:AtlassianPowerKit_PROFILE_LIST_STRING = $PROFILE_LIST
-    Write-Debug "Profiles found: $($env:AtlassianPowerKit_PROFILE_LIST_STRING)"
-    return $PROFILE_LIST
-}
-
-# Function Update-ContentPlaceholderAll, takes a file path and a hashtable of placeholders and values, returning the content with the placeholders replaced (not updating the file)
-function Get-PopulatedTemplate {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$TemplateFilePath,
-        [Parameter(Mandatory = $false)]
-        [string[]]$InputJSON,
-        [Parameter(Mandatory = $false)]
-        [string[]]$InputConfStorageString
-    )
-    # If neither JSON or ConfStorageString is provided error
-    if (-not $InputJSON -and -not $InputConfStorageString) {
-        Write-Debug 'No InputJSON or InputConfStorageString provided to , one is required. Exiting...'
-        Write-Error 'Get-PopulatedTemplate failed. Exiting...'
+    # Check if the profile exists
+    $PROFILE_LIST = Get-AtlassianPowerKitProfileList
+    if (!$PROFILE_LIST.Contains($SelectedProfileName)) {
+        Write-Debug "Profile $SelectedProfileName does not exists in the vault - we have: $PROFILE_LIST"
         return $false
     }
-    $TemplateContent = Get-Content -Path $TemplateFilePath -Raw | ConvertFrom-Json -Depth 20
-    foreach ($item in $TemplateContent.placeholderMap) {
-        foreach ($key in $item.Keys) {
-            $value = $item[$key]
-            $valueDataType = $value.GetType().Name
-
-            # Handle different types of values
-            if ($value -is [System.Collections.IEnumerable] -and -not ($value -is [string])) {
-                $value = $value -join ', '
+    else {
+        Write-Debug "Profile $SelectedProfileName exists in the vault, loading..."
+        try {
+            # if vault is locked, unlock it
+            Unlock-Vault -VaultName $script:VAULT_NAME
+            $PROFILE_DATA = (Get-Secret -Name $SelectedProfileName -Vault $script:VAULT_NAME -AsPlainText)
+            #Create environment variables for each item in the profile data
+            $PROFILE_DATA.GetEnumerator() | ForEach-Object {
+                Write-Debug "Setting environment variable: $($_.Key) = $($_.Value)"
+                # Create environment variable concatenated with AtlassianPowerKit_ prefix
+                $SetEnvar = '$env:AtlassianPowerKit_' + $_.Key + " = `"$($_.Value)`""
+                Invoke-Expression -Command $SetEnvar | Out-Null
+                Write-Debug "Environment variable set: $SetEnvar"
             }
-
-            Write-Host "Key: $key, ValueDataType: $valueDataType, Value: $value"
+        } 
+        catch {
+            Write-Debug "Failed to load profile $SelectedProfileName. Please check the vault key file."
+            throw "Failed to load profile $SelectedProfileName. Please check the vault key file."
         }
+        Set-AtlassianAPIHeaders
+        #Set-OpsgenieAPIHeaders
+        $env:AtlassianPowerKit_CloudID = $(Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/_edge/tenant_info").cloudId
+        Write-Debug "Profile $SelectedProfileName loaded successfully."
     }
-    return $Content
+    $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile
+    return $LOADED_PROFILE
+}
+
+
+# Function to test if AtlassianPowerKit profile authenticates successfully
+function Test-AtlassianPowerKitProfile {
+    Write-Debug 'Testing Atlassian Cloud PowerKit Profile...'
+    #Write-Debug "API Headers: $($script:AtlassianAPIHeaders | Format-List * | Out-String)"
+    Write-Debug "API Endpoint: $($env:AtlassianPowerKit_AtlassianAPIEndpoint) ..."
+    Write-Debug "API Headers: $($env:AtlassianPowerKit_AtlassianAPIHeaders) ..."
+    $HEADERS = ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders
+    $TEST_ENDPOINT = 'https://' + $env:AtlassianPowerKit_AtlassianAPIEndpoint + '/rest/api/2/myself'
+    try {
+        Write-Debug "Running: Invoke-RestMethod -Uri https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/myself -Headers $($env:AtlassianPowerKit_AtlassianAPIHeaders | ConvertFrom-Json -AsHashtable) -Method Get"
+        Invoke-RestMethod -Method Get -Uri $TEST_ENDPOINT -Headers $HEADERS | Write-Debug
+        #Write-Debug "Results: $($REST_RESULTS | ConvertTo-Json -Depth 10) ..."
+        Write-Debug 'Donennnne'
+    }
+    catch {
+        Write-Debug "Error: $_ ..."
+        throw 'Atlassian Cloud API Auth test failed.'
+    }
+    Write-Debug "Atlassian Cloud Auth test returned: $($REST_RESULTS.displayName) --- OK!"
+
+    # Test Opsgenie API if profile uses Opsgenie API
+    if ($env:AtlassianPowerKit_UseOpsgenieAPI) {
+        try {
+            Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_OpsgenieAPIEndpoint)/v1/services?limit=1" -Headers $($env:AtlassianPowerKit_OpsgenieAPIHeaders | ConvertFrom-Json -AsHashtable) -Method Get
+            #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+        }
+        catch {
+            Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
+            Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
+            throw 'Opsgenie API Auth test failed.'
+        }
+        Write-Debug 'Opsgenie Auth test --- OK!'
+    }
+}
+
+function Unlock-Vault {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$VaultName
+    )
+    try {
+        if ((Get-SecretVault | Where-Object IsDefault).Name -ne $script:VAULT_NAME) {
+            Write-Debug "$script:VAULT_NAME is not the default vault. Setting as default..."
+            Set-SecretVaultDefault -Name $script:VAULT_NAME
+        }
+        # Attempt to get a non-existent secret. If the vault is locked, this will throw an error.
+        $VAULT_KEY = Get-VaultKey
+        Unlock-SecretStore -Password $VAULT_KEY
+    }
+    catch {
+        # If an error is thrown, the vault is locked.
+        Write-Debug "Unlock-Vault failed: $_ ..."
+        throw 'Unlock-Vault failed Exiting'
+    }
+    # If no error is thrown, the vault is unlocked.
+    Write-Debug 'Vault is unlocked.'
+}
+
+# Function to update the vault with the new profile data
+function Update-AtlassianPowerKitVault {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$ProfileName,
+        [Parameter(Mandatory = $true)]
+        [hashtable]$ProfileData
+    )
+    Write-Debug "Writing profile data to vault for $ProfileName..."
+    Unlock-Vault -VaultName $script:VAULT_NAME
+    try {
+        Set-Secret -Name $ProfileName -Secret $ProfileData -Vault $script:VAULT_NAME
+    } 
+    catch {
+        Write-Debug "Update of vault failed for $ProfileName."
+        throw "Update of vault failed for $ProfileName."
+    }
+    Write-Debug "Vault entruy for $ProfileName updated successfully."
 }

@@ -1,21 +1,4 @@
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-<#
-.SYNOPSIS
-    Atlassian Cloud PowerShell Module for handy functions to interact with Attlassian Cloud APIs.
-
-.LINK
-GitHub: https://github.com/markz0r/AtlassianPowerKit
-
-#>
-# Function to export a Confluence page by parameterised format to a file, with the page ID and space key
-$EXPORT_EXTENSION_MAP = @{
-    'storage' = 'xhtml'
-    'view' = 'html'
-    'export_view' = 'html'
-    'atlas_doc_format' = 'json'
-    'editor' = 'confluence'
-}
-
 function Export-ConfluencePage {
     param (
         [Parameter(Mandatory = $true)]
@@ -36,7 +19,7 @@ function Export-ConfluencePage {
         Write-Error "Error exporting page format: $CONFLUENCE_PAGE_FORMAT for page ID: $CONFLUENCE_PAGE_ID"
     }
     $CONFLUENCE_PAGE_DIR = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\CONFLUENCE"
-    $CONFLUENCE_PAGE_CPMTEMT = $REST_RESULTS.body.$CONFLUENCE_PAGE_FORMAT
+    $CONFLUENCE_PAGE_CONTENT = $REST_RESULTS.body.$CONFLUENCE_PAGE_FORMAT
     $CONFLUENCE_PAGE_TITLE = $REST_RESULTS.title
     $CONFLUENCE_PAGE_TITLE_FILENAME = $CONFLUENCE_PAGE_TITLE -replace ' ', '_' -replace ':', '-' -replace '[^a-zA-Z0-9_-]', ''
     $CURRENT_DATE_TIME = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -63,11 +46,11 @@ function Export-ConfluencePageAllChildren {
         [int]$DepthCount = 0
     )
     $PARENT_PAGE = Get-ConfluencePageByID -CONFLUENCE_PAGE_ID $CONFLUENCE_PAGE_ID
-    Write-Debug "##############################################"
+    Write-Debug '##############################################'
     Write-Debug "Parent Page Type: $($PARENT_PAGE.GetType())"
     Write-Debug "Parent Page Count: $($PARENT_PAGE.Count)"
     $PARENT_PAGE | ConvertTo-Json -Depth 20 | Write-Debug
-    Write-Debug "##############################################"
+    Write-Debug '##############################################'
     if (!$PARENT_PAGE) {
         throw "Parent page does not exist: $CONFLUENCE_PAGE_ID"
     }
@@ -75,7 +58,7 @@ function Export-ConfluencePageAllChildren {
     $CONFLUENCE_PARENT_PAGE_TITLE = $PARENT_PAGE.title
     Write-Debug "Parent Page ID: $PARENT_PAGE_ID, Title: $CONFLUENCE_PARENT_PAGE_TITLE, DepthCount: $DepthCount, DepthLimit: $DepthLimit - getting child pages..."
     $CHILD_PAGES = $(Get-ConfluenceChildPages -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -PARENT_ID $PARENT_PAGE_ID)
-    $WRITE_DEBUG = $CHILD_PAGES | ConvertTo-Json -Depth 20
+    $CHILD_PAGES | ConvertTo-Json -Depth 20 | Write-Debug
     Write-Debug "Found $($CHILD_PAGES.results.count) child pages..."
     $CHILD_PAGES.results | ForEach-Object {
         Write-Debug "Exporting page format: $CONFLUENCE_PAGE_FORMAT for page ID: $($_.id)..."
@@ -453,78 +436,78 @@ function Set-ConfluenceSpacePropertyByID {
 
 ## INPROGRESS
 # Function set Confluence page content using a storage format file and page ID
-function Set-ConfluencePageContent {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string]$CONFLUENCE_SPACE_KEY,
-        [Parameter(Mandatory = $true)]
-        [int64]$CONFLUENCE_PAGE_ID,
-        [Parameter(Mandatory = $false)]
-        [string]$CONFLUENCE_PAGE_STORAGE_FILE
-    )
-    $MyFunctionName = (Get-PSCallStack)[0].FunctionName
-    $VERSION_MESSAGE = "Updated via AtlassianPowerKit $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Get-ChildItem -Path . -Recurse -Filter 'Naive-ConflunceStorageValidator.psd1' | Import-Module -Force
-    $CONFLUENCE_PAGE_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/wiki/api/v2/pages/$($CONFLUENCE_PAGE_ID)"
-    if ($CONFLUENCE_PAGE_STORAGE_FILE) {
-        Write-Debug "$MyFunctionName- Using file: $CONFLUENCE_PAGE_STORAGE_FILE to update page ID: $CONFLUENCE_PAGE_ID...ignoring -CONFLUENCE_PAGE_STORAGE_FILE_CONTENT if it was provided..."
-    }
-    else {
-        Write-Error 'You must provide either a file path to a storage format file or the content of the storage format file to update the page with parameter -CONFLUENCE_PAGE_STORAGE_FILE or -CONFLUENCE_PAGE_STORAGE_FILE_CONTENT'
-    }
-    Write-Debug "$MyFunctionName Getting existing page title and version number..."
-    $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
-    #$REST_RESULTS | ConvertTo-Json -Depth 40 | Write-Debug
-    $CONFLUENCE_PAGE_TITLE = $REST_RESULTS.title
-    $CURRENT_VERSION = $REST_RESULTS.version.number
-    $CLEANED_FILE_CONTENT = Get-Content -Path $CONFLUENCE_PAGE_STORAGE_FILE -Raw -Encoding UTF8
-    #Write-Debug "Making backup of current page ID: $CONFLUENCE_PAGE_ID..."
-    # Remove pretty formatting, whitepassed, and newlines
-    function Get-ConfluenceStoragePayload {
-        param (
-            [Parameter(Mandatory = $true)]
-            [string]$CleanedXmlContent,
-            [Parameter(Mandatory = $true)]
-            [string]$Title,
-            [Parameter(Mandatory = $true)]
-            [int]$Version,
-            [Parameter(Mandatory = $true)]
-            [int64]$PageId
-        )
+# function Set-ConfluencePageContent {
+#     param (
+#         [Parameter(Mandatory = $true)]
+#         [string]$CONFLUENCE_SPACE_KEY,
+#         [Parameter(Mandatory = $true)]
+#         [int64]$CONFLUENCE_PAGE_ID,
+#         [Parameter(Mandatory = $false)]
+#         [string]$CONFLUENCE_PAGE_STORAGE_FILE
+#     )
+#     $MyFunctionName = (Get-PSCallStack)[0].FunctionName
+#     $VERSION_MESSAGE = "Updated via AtlassianPowerKit $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+#     Get-ChildItem -Path . -Recurse -Filter 'Naive-ConflunceStorageValidator.psd1' | Import-Module -Force
+#     $CONFLUENCE_PAGE_ENDPOINT = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/wiki/api/v2/pages/$($CONFLUENCE_PAGE_ID)"
+#     if ($CONFLUENCE_PAGE_STORAGE_FILE) {
+#         Write-Debug "$MyFunctionName- Using file: $CONFLUENCE_PAGE_STORAGE_FILE to update page ID: $CONFLUENCE_PAGE_ID...ignoring -CONFLUENCE_PAGE_STORAGE_FILE_CONTENT if it was provided..."
+#     }
+#     else {
+#         Write-Error 'You must provide either a file path to a storage format file or the content of the storage format file to update the page with parameter -CONFLUENCE_PAGE_STORAGE_FILE or -CONFLUENCE_PAGE_STORAGE_FILE_CONTENT'
+#     }
+#     Write-Debug "$MyFunctionName Getting existing page title and version number..."
+#     $REST_RESULTS = Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+#     #$REST_RESULTS | ConvertTo-Json -Depth 40 | Write-Debug
+#     $CONFLUENCE_PAGE_TITLE = $REST_RESULTS.title
+#     $CURRENT_VERSION = $REST_RESULTS.version.number
+#     $CLEANED_FILE_CONTENT = Get-Content -Path $CONFLUENCE_PAGE_STORAGE_FILE -Raw -Encoding UTF8
+#     #Write-Debug "Making backup of current page ID: $CONFLUENCE_PAGE_ID..."
+#     # Remove pretty formatting, whitepassed, and newlines
+#     function Get-ConfluenceStoragePayload {
+#         param (
+#             [Parameter(Mandatory = $true)]
+#             [string]$CleanedXmlContent,
+#             [Parameter(Mandatory = $true)]
+#             [string]$Title,
+#             [Parameter(Mandatory = $true)]
+#             [int]$Version,
+#             [Parameter(Mandatory = $true)]
+#             [int64]$PageId
+#         )
 
-        $body = @{
-            representation = 'storage'
-            value          = $CleanedXmlContent
-        }
+#         $body = @{
+#             representation = 'storage'
+#             value          = $CleanedXmlContent
+#         }
 
-        $payload = @{
-            id      = $PageId
-            title   = $Title
-            version = @{
-                number  = $Version
-                message = $VERSION_MESSAGE
-            }
-            body    = @{
-                storage = $body
-            }
-            status  = 'current'
-        }
+#         $payload = @{
+#             id      = $PageId
+#             title   = $Title
+#             version = @{
+#                 number  = $Version
+#                 message = $VERSION_MESSAGE
+#             }
+#             body    = @{
+#                 storage = $body
+#             }
+#             status  = 'current'
+#         }
 
-        return $payload | ConvertTo-Json -Depth 10 -Compress
-    }
-    $NEW_VERSION = $CURRENT_VERSION + 1
-    Write-Debug "$MyFunctionName - Page Payload: $PAGE_PAYLOAD"
-    try {
-        #Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
-        Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Method Put -ContentType 'application/json' -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Body $(Get-ConfluenceStoragePayload -CleanedXmlContent $CLEANED_FILE_CONTENT -Title $CONFLUENCE_PAGE_TITLE -Version $NEW_VERSION -PageId $CONFLUENCE_PAGE_ID)
-    }
-    catch {
-        Write-Debug $(Prepare-ConfluenceStoragePayload -CleanedXmlContent $CLEANED_FILE_CONTENT -Title $CONFLUENCE_PAGE_TITLE -Version $NEW_VERSION -PageId $CONFLUENCE_PAGE_ID)
-        Write-Debug "$MyFunctionName - StatusCode: $($_.Exception.Response.StatusCode.value__)"
-        Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
-        Write-Error "Error updating field: $($_.Exception.Message)"
-    }
-}
+#         return $payload | ConvertTo-Json -Depth 10 -Compress
+#     }
+#     $NEW_VERSION = $CURRENT_VERSION + 1
+#     Write-Debug "$MyFunctionName - Page Payload: $PAGE_PAYLOAD"
+#     try {
+#         #Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+#         Invoke-RestMethod -Uri $CONFLUENCE_PAGE_ENDPOINT -Method Put -ContentType 'application/json' -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Body $(Get-ConfluenceStoragePayload -CleanedXmlContent $CLEANED_FILE_CONTENT -Title $CONFLUENCE_PAGE_TITLE -Version $NEW_VERSION -PageId $CONFLUENCE_PAGE_ID)
+#     }
+#     catch {
+#         Write-Debug $(Prepare-ConfluenceStoragePayload -CleanedXmlContent $CLEANED_FILE_CONTENT -Title $CONFLUENCE_PAGE_TITLE -Version $NEW_VERSION -PageId $CONFLUENCE_PAGE_ID)
+#         Write-Debug "$MyFunctionName - StatusCode: $($_.Exception.Response.StatusCode.value__)"
+#         Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
+#         Write-Error "Error updating field: $($_.Exception.Message)"
+#     }
+# }
 # Function to take a CONFLUENCE_PAGE_ID, validate it is in 'YYYY (.*)' format, get a list of Child Pages, and if it doesn't already exist, create a new child page with the title 'YYYY[1-12] (.*)', move any existing child pages that title match 'YYYYMM.*' to the new child page, and then move the new child page to the top of the list
 function Set-ConfluenceYearMonthStructure {
     param (

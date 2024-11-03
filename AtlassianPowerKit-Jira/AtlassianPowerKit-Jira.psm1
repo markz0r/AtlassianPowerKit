@@ -107,12 +107,6 @@ function Get-JiraFilterResultsAsConfluenceTable {
         $TABLE_HEADERS += "<th><p>$($_.label)</p></th>"
     }
     $TABLE_HEADERS += '</tr>'
-    # Write-Debug '##########################################################'
-    # Write-Debug 'Get-JiraFilterResultsAsConfluenceTable - Header: '
-    # Write-Debug $TABLE_HEADERS
-    # Write-Debug '##########################################################'
-        
-    # Get-Content $_ | ConvertFrom-Json -Depth 20 | ForEach-Object { Write-Host "Key: $($_.key) - Summary: $($_.fields.summary) - Portal Link: $($_.fields.customfield_10393) - Classification:$($_.fields.customfield_10275) " }
     Write-Debug '########################################################## Get-JiraFilterResultsAsConfluenceTable calling Get-JiraCloudJQLQueryResult'
     $JSON_PART_FILES = Get-JiraCloudJQLQueryResult -JQL_STRING $FILTER_INFO.jql -RETURN_FIELDS $COLUMN_VALS
     Write-Debug '########################################################## Get-JiraFilterResultsAsConfluenceTable returned from Get-JiraCloudJQLQueryResult - Done'
@@ -148,6 +142,51 @@ function Get-JiraFilterResultsAsConfluenceTable {
     return $CONFLUENCE_STORAGE_RAW
 }
 
+# Funtion to list JIRA issue filters including ID, name, and JQL query
+function Get-JiraOSMFilterList {
+    param (
+        [Parameter(Mandatory = $false)]
+        [string]$PROJECT_KEY = 'GRCOSM'
+    )
+    $FILTERS_SEARCH_URL = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/filter/search"
+    # Get Project ID project with key GRCOSM
+    $PROJECT_ID = Get-JiraProjectList -PROJECT_KEY $PROJECT_KEY | ConvertFrom-Json | Select-Object -ExpandProperty id
+    Write-Debug "Project ID: $PROJECT_ID"
+    $SEARCH_TERMS_FOR_FILTERS = @(
+        @{ 'Name' = 'filterName'; 'Value' = 'osm' },
+        @{ 'Name' = 'projectId'; 'Value' = $PROJECT_ID }
+    )
+    $FILTER_RESULTS = @()
+    $SEARCH_TERMS_FOR_FILTERS | ForEach-Object {
+        Write-Debug "Searching for filters with: $($_.Name) = $($_.Value)"
+        $REQUEST_RESPONSE = Invoke-RestMethod -Uri ($FILTERS_SEARCH_URL + '?' + $_.Name + '=' + $_.Value) -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+        $FILTER_RESULTS += $REQUEST_RESPONSE.values
+        While (!$REQUEST_RESPONSE.isLast) {
+            $REQUEST_RESPONSE = Invoke-RestMethod -Uri $REQUEST_RESPONSE.nextPage -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+            $FILTER_RESULTS += $REQUEST_RESPONSE.values
+        }
+    }
+    # Remove duplicates
+    $FILTER_RESULTS = $FILTER_RESULTS | Select-Object -Property * | Sort-Object -Property name -Unique
+    # For each filter, append the JQL query to the filter object
+    $FILTER_RESULTS | ForEach-Object {
+        $FILTER_ID = $_.id
+        # While response code is 429, wait and try again
+        $REST_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/filter/$($FILTER_ID)" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+        # If response is 429, wait and try again
+        while ($REST_RESPONSE -eq 429) {
+            Write-Debug "429 response, waiting $REQ_SLEEP_SEC_LONG seconds..."
+            Start-Sleep -Seconds $REQ_SLEEP_SEC_LONG
+            $REST_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/filter/$($FILTER_ID)" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+        }
+        $_ | Add-Member -MemberType NoteProperty -Name 'jql' -Value $REST_RESPONSE.jql
+        
+    }
+    # Write all details to terminal
+    $FILTER_RESULTS_JSON = $FILTER_RESULTS | ConvertTo-Json -Depth 50
+    return $FILTER_RESULTS_JSON
+}
+
 function Get-JiraIssueChangeNullsFromJQL {
     param (
         [Parameter(Mandatory = $true)]
@@ -172,8 +211,8 @@ function Get-JiraIssueChangeNullsFromJQL {
     }
     # Write formated list of null changes to terminal
     $NULL_CHANGE_ITEMS | ForEach-Object {
-        Write-Debug "$($_.key) - Field: $($_.field) (ID: $($_.fieldId)), Type: $($_.fieldtype) --- Value nulled: $($_.from)           [Created: $($_.created) - Author: $($_.author)]"
-        #Write-Debug "Restore with: Set-JiraIssueField -ISSUE_KEY $($_.key) -Field_Ref $($_.fieldId) -New_Value $($_.from) -FieldType $($_.fieldtype)"
+        Write-Debug "$($_.key) - Field: $($_.field) (ID: $($_.fieldId)), Type: $($_.fieldtype) --- Value nulled: $($_.from) [Created: $($_.created) - Author: $($_.author)]'
+            #Write-Debug 'Restore with: Set-JiraIssueField -ISSUE_KEY $($_.key) -Field_Ref $($_.fieldId) -New_Value $($_.from) -FieldType $($_.fieldtype)"
     }
     $ATTEMPT_RESTORE = Read-Host 'Do you want to attempt to restore the nulled values? Y/N [N]'
     if ($ATTEMPT_RESTORE -eq 'Y') {
@@ -200,7 +239,7 @@ function Get-JiraIssueChangeNullsFromJQL {
             }
 
             Set-JiraIssueField -ISSUE_KEY $_.key -Field_Ref $TARGET_FIELD -New_Value $New_Value -FieldType $_.fieldtype
-            Write-Debug "Updated: $($_.issue) - Field: $($_.field): Value restored: $($_.fromString)       --- data_val:[$($_.from)]"
+            Write-Debug "Updated: $($_.issue) - Field: $($_.field): Value restored: $($_.fromString) --- data_val:[$($_.from)]"
         }
 
     }
@@ -231,20 +270,20 @@ function Get-JSONFieldsWithData {
         )
         #Write-Debug "Processing JSON_OBJECT: $($JSON_OBJECT.GetType())"
         $JSON_OBJECT = $RAW_JSON | ConvertFrom-Json -Depth 40
-        Write-Debug "Processing JSON_OBJECT: $($($JSON_OBJECT).GetType())"
-        Write-Debug "Search-JSONObjectArray -- Issues Count: $($JSON_OBJECT.issues.Count)"
+        Write-Debug "Processing JSON_OBJECT: $($($JSON_OBJECT).GetType())'
+            Write-Debug 'Search-JSONObjectArray -- Issues Count: $($JSON_OBJECT.issues.Count)"
         
         $JSON_OBJECT.issues.fields | ForEach-Object {
             $FIELDS = $_
-            #Write-Debug "Processing fields: $($FIELDS.GetType())"
-            #Write-Debug "Fields: $($FIELDS.Count)"
-            #Write-Debug "Fields: $($FIELDS)"
+            #Write-Debug "Processing fields: $($FIELDS.GetType())'
+            #Write-Debug 'Fields: $($FIELDS.Count)'
+            #Write-Debug 'Fields: $($FIELDS)"
             Write-Debug 'Converting to Hashtable...'
         
             $FIELDSHashtable = @{}
             $FIELDS | ForEach-Object { $_.psobject.properties } | ForEach-Object { $FIELDSHashtable[$_.Name] = $_.Value }
-            Write-Debug "FieldsHashtable Type: $($FIELDSHashtable.GetType())"
-            Write-Debug "FieldsHashtable Count: $($FIELDSHashtable.Count)"
+            Write-Debug "FieldsHashtable Type: $($FIELDSHashtable.GetType())'
+                Write-Debug 'FieldsHashtable Count: $($FIELDSHashtable.Count)"
             Write-Output $FIELDSHashtable
             
             #Write-Debug 'Skipping enumeration...'
@@ -259,11 +298,11 @@ function Get-JSONFieldsWithData {
                     Write-Debug '######'
                     Write-Debug "Field with data: $($FIELD | ConvertTo-Json -Depth 10)"
                     $FIELD_INFO = $JIRA_FIELD_ARRAY | Where-Object { $_.id -eq $FIELD.Key }
-                    Write-Debug "Field with data, field info name: $($FIELD_INFO.name)"
-                    Write-Debug "$($($FIELD.Name, $FIELD_INFO, $($FIELD.Value)).ToString())"
+                    Write-Debug "Field with data, field info name: $($FIELD_INFO.name)'
+                        Write-Debug '$($($FIELD.Name, $FIELD_INFO, $($FIELD.Value)).ToString())"
                     if (!(($DATA_FIELD_LIST.Count -gt 0) -and ($DATA_FIELD_LIST.ContainsKey($FIELD_INFO.Key)))) {
                         Write-Debug "Adding new field to DATA_FIELD_LIST: $FIELD.Name ----> $FIELD_INFO.name"
-                        $DATA_FIELD_LIST[$($FIELD_INFO.name)] = "$($FIELD_INFO.name), $($FIELD.Name), $($($FIELD_INFO | ConvertTo-Json -Depth 2 -Compress) -replace(',', ' ')), $($($($FIELD.Value) | ConvertTo-Json -Depth 1 -Compress) -replace(',', ' '))"
+                        $DATA_FIELD_LIST[$($FIELD_INFO.name)] = "$($FIELD_INFO.name), $($FIELD.Name), $($($FIELD_INFO | ConvertTo-Json -Depth 2 -Compress) -replace (',', ' ')), $($($($FIELD.Value) | ConvertTo-Json -Depth 1 -Compress) -replace (',', ' '))"
                     }
                 }
             }
@@ -277,10 +316,10 @@ function Get-JSONFieldsWithData {
     }
     else {
         $RAW_JSON_STRING = Get-Content -Path $FILE_PATH -Raw
-        Write-Debug "Raw JSON String:  $($RAW_JSON_STRING.GetType())"
+        Write-Debug "Raw JSON String: $($RAW_JSON_STRING.GetType())"
         $JSON_OBJECT_ARRAY = $RAW_JSON_STRING | ConvertFrom-Json -Depth 40
-        Write-Debug "JSON_OBJECT_ARRAY: $JSON_OBJECT_ARRAY.GetType()"
-        Write-Output "Issue Count: $($JSON_OBJECT_ARRAY.issues.Count)"
+        Write-Debug "JSON_OBJECT_ARRAY: $JSON_OBJECT_ARRAY.GetType()'
+            Write-Output 'Issue Count: $($JSON_OBJECT_ARRAY.issues.Count)"
         Write-Debug 'FILE_CONTENT read successfully on surface. Processing JSON_OBJECT_ARRAY...'
         Search-JSONObjectArray -RAW_JSON $RAW_JSON_STRING
     }
@@ -295,8 +334,8 @@ function Get-JSONFieldsWithData {
     $CSV_DATA = @() 
     $CSV_DATA += 'Field Name, Field ID, Field Info, Field Value'
     # sort the data field list by field name and write values to the CSV file
-    Write-Debug "DATA_FIELD_LIST: $($DATA_FIELD_LIST.GetType())"
-    Write-Debug "Fields with data: $($DATA_FIELD_LIST.Count)"
+    Write-Debug "DATA_FIELD_LIST: $($DATA_FIELD_LIST.GetType())'
+        Write-Debug 'Fields with data: $($DATA_FIELD_LIST.Count)"
     $DATA_FIELD_LIST.GetEnumerator() | Sort-Object -Property Name | ForEach-Object {
         # Write each of the array values to the CSV file
         # Make a csv entry for the value object
@@ -311,20 +350,6 @@ function Get-JSONFieldsWithData {
     Write-Debug "Fields with data written to: $((Get-Item -Path $OUTPUT_FILE).Directory.FullName)"
 }
 
-function Get-JiraFieldMap {
-    $JIRA_FIELDS = Get-JiraFields
-    $JIRA_FIELD_MAPS = @{}
-    $JIRA_FIELDS | ForEach-Object {
-        if ($_.id -and $_.name) {
-            $JIRA_FIELD_MAPS[$_.id] = $_.name
-        }
-        else {
-            Write-Debug "Field ID or name not found for field: $_.ToString()"
-        }
-    }
-    Write-Debug "JIRA_FIELD_MAPS - FUNCTION: $($JIRA_FIELD_MAPS.GetType())"
-    return $JIRA_FIELD_MAPS
-}
 # Function to check if a Jira issue exists by key or ID
 function Test-JiraIssueExists {
     param (
@@ -366,7 +391,9 @@ function Get-JiraIssueLinks {
         [Parameter(Mandatory = $true)]
         [string]$IssueKey,
         [Parameter(Mandatory = $false)]
-        [switch]$NoExport
+        [switch]$NoExport = $false,
+        [Parameter(Mandatory = $false)]
+        [string]$filter_link_type
     )
     try {
         $ISSUE_LINKS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/issue/$($IssueKey)?fields=issuelinks" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
@@ -425,6 +452,8 @@ function Get-JiraCloudJQLQueryResult {
         [Parameter(Mandatory = $true)]
         [string]$JQL_STRING,
         [Parameter(Mandatory = $false)]
+        [switch]$MapFieldNames = $false,
+        [Parameter(Mandatory = $false)]
         [string[]]$RETURN_FIELDS,
         [Parameter(Mandatory = $false)]
         [switch]$IncludeEmptyFields = $false
@@ -481,27 +510,52 @@ function Get-JiraCloudJQLQueryResult {
             return $null
         }
     } -AsJob -ThrottleLimit 5 | Receive-Job -AutoRemoveJob -Wait 
-    $COMBINED_ISSUES = @()
-    if (!$IncludeEmptyFields) {
-        $COMBINED_ISSUES = $OUTPUT_FILE_LIST | ForEach-Object {
-            $PARTIAL_OUTPUT_FILE = $_
-            $JSON_CONTENT = Get-Content -Path $PARTIAL_OUTPUT_FILE
-            $CLEAN_ISSUES = $JSON_CONTENT | ConvertFrom-Json | ForEach-Object {
-                $ISSUE = $_
-                Write-Debug "Processing issue: $($ISSUE.key)"
-                $FIELDS_ARRAY = $_.fields
-                Write-Debug "FIELDS ARRAY TYPE IS: $($FIELDS_ARRAY.GetType())"
-                Write-Debug "FIELD COUNT FOR ISSUE: $($FIELDS_ARRAY.Count)"
-                $CLEAN_FIELD_ARRAY = Clear-EmptyFields -Object $FIELDS_ARRAY
-                # Replace the fields array with the cleaned fields array in the issue object
-                $ISSUE.fields = $CLEAN_FIELD_ARRAY
-                return $ISSUE
-            }
-            return $CLEAN_ISSUES 
-        }
+    $COMBINED_ISSUES = $OUTPUT_FILE_LIST | ForEach-Object {
+        $JSON_CONTENT = Get-Content -Path $_ -Raw
+        #Write-Debug "JSON_CONTENT: $JSON_CONTENT"
+        #Return all of the object within the JSON object array as individual objects
+        $JSON_OBJECT_ARRAY = $JSON_CONTENT | ConvertFrom-Json -Depth 100
+        Write-Debug "JSON_OBJECT_ARRAY_COUNT: $($JSON_OBJECT_ARRAY.Count)"
+        $JSON_OBJECT_ARRAY
     }
-    else {
-        $COMBINED_ISSUES = $OUTPUT_FILE_LIST | Get-Content | ConvertFrom-Json
+    Write-Debug "COMBINED_ISSUES: $($COMBINED_ISSUES.GetType())'
+        Write-Debug 'COMBINED_ISSUES Count: $($COMBINED_ISSUES.Count)"
+    if (!$IncludeEmptyFields) {
+        $CLEAN_ISSUES = $COMBINED_ISSUES | ForEach-Object {
+            $ISSUE = $_
+            #Write-Debug "Processing issue: $($ISSUE.key)"
+            $FIELDS_ARRAY = $_.fields
+            #Write-Debug "FIELDS ARRAY TYPE IS: $($FIELDS_ARRAY.GetType())'
+            #Write-Debug 'FIELD COUNT FOR ISSUE: $($FIELDS_ARRAY.Count)"
+            $CLEAN_FIELD_ARRAY = Clear-EmptyFields -Object $FIELDS_ARRAY
+            # Replace the fields array with the cleaned fields array in the issue object
+            $ISSUE.fields = $CLEAN_FIELD_ARRAY
+            return $ISSUE
+        }
+        # Replace the combined issues array with the cleaned issues array
+        $COMBINED_ISSUES = $CLEAN_ISSUES
+    }
+    if ($MapFieldNames) {
+        # Get the field mappings from Jira
+        $JIRA_FIELDS = Get-JiraFields
+
+        # Create a hashtable to map field IDs to field names
+        $JIRA_FIELD_MAPS = @{}
+        $JIRA_FIELDS | ForEach-Object {
+            $JIRA_FIELD_MAPS[$_.id] = $_.name
+            Write-Debug "JIRA_FIELD_MAPS: $($_.id) - $($_.name)"
+        }
+
+        # Map the field names in the combined issues
+        $COMBINED_ISSUES | ForEach-Object {
+            $_.fields.PSObject.Properties | ForEach-Object {
+                if ($JIRA_FIELD_MAPS.ContainsKey($_.Name)) {
+                    $newName = $JIRA_FIELD_MAPS[$_.Name]
+                    $_ | Add-Member -MemberType NoteProperty -Name $newName -Value $_.Value -Force
+                    $_.PSObject.Properties.Remove($_.Name)
+                }
+            }
+        }
     }
     $COMBINED_ISSUES | ConvertTo-Json -Depth 100 -Compress | Out-File -FilePath $OUTPUT_FILE
     Write-Debug "JIRA COMBINED Query results written to: $OUTPUT_FILE"
@@ -524,92 +578,6 @@ function Get-JiraIssueChangeLog {
     return $CHANGE_LOG
 
 }
-# TODO - Make this function generic with JSON_MAP parameter
-function Set-SSGRequirementFields {
-    param (
-        [Parameter(Mandatory = $false)]
-        [string]$JQL_STRING = 'project = GRCOSM AND issuetype = Requirement AND "Applicability[Dropdown]" = Applicable and key > "GRCOSM-66"'
-    )
-    $FIELD_ID_NAME_MAP_JSON = Get-JIRAFieldMap
-    $FIELD_ID_NAME_MAP = ConvertFrom-Json -InputObject $FIELD_ID_NAME_MAP_JSON -AsHashtable
-    $FIELD_LINKTYPE_JSON_MAP = '{
-        "Applicability Justification": "is caused by",
-        "Security Requirements": "addressed by",
-        "Dependencies": "met by"
-    }'
-    $PAYLOAD_HASHTABLE = @{}
-    # Create a hash table of the field name and field ID for the field names in the JSON object
-    $FIELD_LINKTYPE_MAP = ConvertFrom-Json -InputObject $FIELD_LINKTYPE_JSON_MAP -AsHashtable
-    # For each issue in the JQL query, get the issue JSON, get the issue links of HASHMAP type and set the field value to a bullet list of linked issues
-    $ISSUES = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING
-    $ISSUES.issues | ForEach-Object {
-        $THIS_LINKED_ISSUES = @()
-        $ISSUE = $_
-        $ISSUE_KEY = $ISSUE.key
-        $ISSUE_LINKS_JSON_ARRAY = Get-JiraIssueLinks -IssueKey $ISSUE_KEY
-        #Write-Debug "ISSUE_LINKS_JSON_ARRAY: $($ISSUE_LINKS_JSON_ARRAY.GetType())"
-        #Write-Debug "ISSUE_LINKS_JSON_ARRAY: $($ISSUE_LINKS_JSON_ARRAY.Count)"
-        # ISSUE_LINKS_JSON_ARRAY is System.Object[], so we need to convert it to a JSON object then print it
-        #Write-Debug $($ISSUE_LINKS_JSON_ARRAY | ConvertTo-Json -Depth 10)
-        # For each $FIELD_LINKTYPE_MAP
-        if ($ISSUE_LINKS_JSON_ARRAY.Count -eq 0) {
-            Write-Debug "No linked issues found for $ISSUE_KEY"
-            return
-        }
-        else {
-            Write-Debug "Linked issues found for $ISSUE_KEY"
-            $FIELD_LINKTYPE_MAP.GetEnumerator() | ForEach-Object {
-                $FIELD_NAME = $_.Key
-                $INWARD_LINK_TYPE = $_.Value
-                $THIS_LINKED_ISSUES = $ISSUE_LINKS_JSON_ARRAY | Where-Object { $_.type.inward -eq $INWARD_LINK_TYPE }
-                if ($THIS_LINKED_ISSUES.Count -eq 0) {
-                    Write-Debug "No linked issues found for $FIELD_NAME"
-                    return
-                }
-                else {
-                    Write-Debug "Linked issues found for $FIELD_NAME"
-
-                    # Create a bullet list of linked issues with "* https://$($Env:AtlassianPowerKit_AtlassianAPIEndpoint)/browse/$($_.inwardIssue.key)"
-                    $LINKED_ISSUES_LIST = $THIS_LINKED_ISSUES | ForEach-Object { 
-                        "* [$($_.inwardIssue.fields.summary)|https://$($Env:AtlassianPowerKit_AtlassianAPIEndpoint)/browse/$($_.inwardIssue.key)] `n ** $($_.inwardIssue.key)" 
-                    }
-                    Write-Debug "FIELD_ID_NAME_MAP type = $($FIELD_ID_NAME_MAP.GetType())"
-                    Write-Debug "FIELD_ID_NAME_MAP Count: $($FIELD_ID_NAME_MAP.Count)"
-                    Write-Debug "FIELD_ID_NAME_MAP: $($FIELD_ID_NAME_MAP)"           
-                    $FIELD_ID = $FIELD_ID_NAME_MAP[$FIELD_NAME]
-                    $PAYLOAD_HASHTABLE[$FIELD_ID] = $LINKED_ISSUES_LIST
-                }
-            }
-            #Write-Debug "Setting fields for issue: $ISSUE_KEY"
-            #Write-Debug "Payload: $($PAYLOAD_HASHTABLE | ConvertTo-Json -Depth 10)"
-            # OUTPUTS:
-            # Payload: {
-            #   "Applicability Justification": [
-            #     "[https://securityshift.atlassian.net/browse/GRCOSM-323|https://securityshift.atlassian.net/browse/GRCOSM-323|smart-link]",
-            #     "[https://securityshift.atlassian.net/browse/GRCOSM-325|https://securityshift.atlassian.net/browse/GRCOSM-325|smart-link]"
-            #   ],
-            #   "Dependencies": [
-            #     "[https://securityshift.atlassian.net/browse/GRCOSM-547|https://securityshift.atlassian.net/browse/GRCOSM-547|smart-link]",
-            #     "[https://securityshift.atlassian.net/browse/GRCOSM-614|https://securityshift.atlassian.net/browse/GRCOSM-614|smart-link]"
-            #   ],
-            #   "Security Requirements": [
-            #     "[https://securityshift.atlassian.net/browse/GRCOSM-429|https://securityshift.atlassian.net/browse/GRCOSM-429|smart-link]",
-            #     "[https://securityshift.atlassian.net/browse/GRCOSM-434|https://securityshift.atlassian.net/browse/GRCOSM-434|smart-link]"
-            #   ]
-            # Now set the rich text fields with the bullet list of linked issues
-            if ($PAYLOAD_HASHTABLE.Count -gt 0) {
-                $PAYLOAD_HASHTABLE.GetEnumerator() | ForEach-Object {
-                    if ($_.Value) {
-                        $FIELD_NAME = $_.Key
-                        $FIELD_VALUE = $_.Value -join "`n"
-                        Write-Debug "Setting field: -ISSUE_KEY $ISSUE_KEY -Field_Ref $FIELD_NAME -New_Value $FIELD_VALUE -FieldType 'text'"
-                        Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref $FIELD_NAME -New_Value $FIELD_VALUE -FieldType 'text'
-                    }
-                }
-            }
-        }
-    }
-}
 
 # Function to edit a Jira issue field given the issue key, field name, and new value
 function Set-JiraIssueField {
@@ -617,11 +585,11 @@ function Set-JiraIssueField {
         [Parameter(Mandatory = $true)]
         [string]$ISSUE_KEY,
         [Parameter(Mandatory = $true)]
-        [string]$Field_Ref,
+        [string]$FIELD_REF,
         [Parameter(Mandatory = $true)]
-        [array]$New_Value,
+        [array]$NEW_VALUE,
         [Parameter(Mandatory = $false)]
-        [string]$FieldType = 'text'
+        [string]$FIELD_TYPE = 'text'
     )
     $FIELD_PAYLOAD = @{}
     function Set-MutliSelectPayload {
@@ -643,11 +611,11 @@ function Set-JiraIssueField {
         'multi-select' { $FIELD_PAYLOAD = $(Set-MutliSelectPayload) }
         'single-select' { $FIELD_PAYLOAD = @{fields = @{"$Field_Ref" = @{value = "$New_Value" } } } }
         'text' { $FIELD_PAYLOAD = @{fields = @{"$Field_Ref" = "$New_Value" } } }
+        'null' { $FIELD_PAYLOAD = @{fields = @{"$Field_Ref" = null } } }
         Default { $FIELD_PAYLOAD = @{fields = @{"$Field_Ref" = "$New_Value" } } }
     }
     $REQUEST_URL = "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/issue/$($ISSUE_KEY)" 
     # Run the REST API call to update the field with verbose debug output
-    $FIELD_PAYLOAD = $FIELD_PAYLOAD | ConvertTo-Json -Depth 10 -Compress
     Write-Debug "Field Payload: $FIELD_PAYLOAD"
     #Write-Debug "Trying: Invoke-RestMethod -Uri $REQUEST_URL -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Put -Body $FIELD_PAYLOAD -ContentType 'application/json'"
     try {
@@ -655,9 +623,10 @@ function Set-JiraIssueField {
     }
     catch {
         Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
-        Write-Error "Error updating field: $($_.Exception.Message)"
+        Write-Error "Error updating field: $($_.Exception.Message)'
+        }
+        Write-Debug '$UPDATE_ISSUE_RESPONSE"
     }
-    Write-Debug "$UPDATE_ISSUE_RESPONSE"
 }
 
 # Function to set-jiraissuefield for a Jira issue field for all issues in JQL query results gibven the JQL query string, field name, and new value
@@ -666,7 +635,16 @@ function Set-JiraIssueFieldForJQLQueryResults {
         [Parameter(Mandatory = $true)]
         [string]$JQL_STRING,
         [Parameter(Mandatory = $true)]
-        [string]$JSON_TEMPLATE_FILE
+        [string]$FIELD_REF,
+        [Parameter(Mandatory = $true)]
+        [string]$FIELD_TYPE,
+        [Parameter(Mandatory = $true)]
+        [string]$NEW_VALUE,
+        [Parameter(Mandatory = $false)]
+        [Switch]$DryRun = $false
+
+        # [Parameter(Mandatory = $true)]
+        # [string]$JSON_TEMPLATE_FILE
     )
     $ISSUES = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING
     $ISSUES.issues | ForEach-Object {
@@ -674,8 +652,12 @@ function Set-JiraIssueFieldForJQLQueryResults {
         $ISSUE_KEY = $ISSUE.key
         $ISSUE_SUMMARY = $ISSUE.fields.summary
         Write-Debug "Updating fields for issue: $($_.key - $ISSUE_SUMMARY)"
-        $NEW_ISSUE_VALUE = $New_Value
-        Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref $Field_Ref -New_Value $NEW_ISSUE_VALUE -FieldType $FieldType
+        if (! $DryRun) {
+            Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref $FIELD_REF -New_Value $NEW_VALUE -FieldType $FIELD_TYPE
+        }
+        else {
+            Write-Debug "Dry Run: Set-JiraIssueField -ISSUE_KEY $ISSUE_KEY -Field_Ref $FIELD_REF -New_Value $NEW_VALUE"
+        }
     }
 }
 
@@ -710,10 +692,10 @@ function Get-JiraIssueChangeNulls {
             $NULL_CHANGE_ITEMS += $MAMMA.items | Where-Object {
                 (($SELECTOR -eq $($_.fieldId)) -and ($INCLDUED_VALUES.Contains($_.toString)))
                 #Write-Debug "Selector: $SELECTOR"
-                #Write-Debug "changelog: $($_.fieldId)"
-                #Write-Debug "changelog: $($_.field)"
-                #Write-Debug "changelog: $($_.toString)"
-                #Write-Debug "changelog: $($_.to)"
+                #Write-Debug "changelog: $($_.fieldId)'
+                #Write-Debug 'changelog: $($_.field)'
+                #Write-Debug 'changelog: $($_.toString)'
+                #Write-Debug 'changelog: $($_.to)'
             }
             
         }
@@ -721,7 +703,7 @@ function Get-JiraIssueChangeNulls {
     Write-Debug "Selector: $SELECTOR"
     Write-Debug "Change Nulls identified: $($NULL_CHANGE_ITEMS.count) for issue: $Key"
     if ($NULL_CHANGE_ITEMS) {
-        #Write-Debug "Nulled Change log entry items found for issue [$ISSUE_LINK] in $CHECK_MONTHS months --> $($NULL_CHANGE_ITEMS.count) <-- ..."
+        #Write-Debug "Nulled Change log entry items found for issue [$ISSUE_LINK] in $CHECK_MONTHS months --> $($NULL_CHANGE_ITEMS.count) -- ..."
         $NULL_CHANGE_ITEMS | ForEach-Object {
             #Write-Debug "Change log entry item for field: $($_.field) - $($_.fieldId) found for issue [$ISSUE_LINK] in $CHECK_MONTHS months..."
             $_ | Add-Member -MemberType NoteProperty -Name 'issue' -Value $ISSUE_LINK
@@ -751,17 +733,66 @@ function Get-JiraStatuses {
         [switch]$WriteOutput = $false
     )
     $REST_RESULTS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/status" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+    function Get-DuplicateJiraStatusNames {
+        param (
+            [Parameter(Mandatory = $true)]
+            [psobject[]]$JIRA_STATUSES,
+            [Parameter(Mandatory = $false)]
+            [switch]$WriteOutput = $false,
+            [Parameter(Mandatory = $false)]
+            [int]$Threshold = 3  # Levenshtein distance threshold for considering names as similar
+        )
+
+        $JIRA_STATUS_NAMES = @()
+
+        # Initialize the duplicate properties for each status
+        $JIRA_STATUSES | ForEach-Object {
+            Add-Member -InputObject $_ -MemberType NoteProperty -Name 'duplicate' -Value $false
+            Add-Member -InputObject $_ -MemberType NoteProperty -Name 'duplicate_ids' -Value @()
+        }
+
+        $JIRA_STATUSES | ForEach-Object {
+            $statusName = $_.name
+            $statusId = $_.id
+            $isDuplicate = $false
+
+            foreach ($existingStatus in $JIRA_STATUS_NAMES) {
+                $distance = Get-LevenshteinDistance -s $statusName -t $existingStatus.name
+                if ($distance -le $Threshold) {
+                    $_.duplicate = $true
+                    $_.duplicate_ids += $existingStatus.id
+                    $existingStatus.duplicate = $true
+                    $existingStatus.duplicate_ids += $statusId
+                    $isDuplicate = $true
+                    break
+                }
+            }
+
+            if (-not $isDuplicate) {
+                $JIRA_STATUS_NAMES += $_
+            }
+        }
+
+        if ($WriteOutput) {
+            $JIRA_STATUSES | ForEach-Object { Write-Output $_ }
+        }
+        return $JIRA_STATUSES
+    }
     if ($WriteOutput) {
         $OUTPUT_FILE = "$env:OSM_HOME\$env:AtlassianPowerKit_PROFILE_NAME\JIRA\$env:AtlassianPowerKit_PROFILE_NAME-JIRAStatuses-$(Get-Date -Format 'yyyyMMdd-HHmmss').xlsx"
         if (-not (Test-Path $OUTPUT_FILE)) {
             New-Item -ItemType File -Path $OUTPUT_FILE -Force | Out-Null
         }
-        # Write the $($_.name), $($_.id), $($_.description), $($_.self), "$($_.statusCategory.name)","$($_.statusCategory.id) for each status to the XLSX file and format as a table
-        
+        $REST_RESULTS | ConvertTo-Csv -UseQuotes Never -Delimiter '-' -NoHeader | Out-File -FilePath $OUTPUT_FILE
+        Write-Debug "Jira Statuses written to: $OUTPUT_FILE"
     }
-    else {
-        return $REST_RESULTS
+    $DUPLICATES = (Get-DuplicateJiraStatusNames -JIRA_STATUSES $REST_RESULTS | Where-Object { $_.duplicate -eq $true } | Sort-Object -Property name)
+    Write-Debug "Jira Statuses with duplicates: $($DUPLICATES.Count)"
+    Write-Debug 'Dulplicate list: '
+    $DUPLICATES | ForEach-Object {
+        Write-Debug "$($_.name) - $($_.id) - $($_.duplicate) - $($_.duplicate_ids)"
     }
+    return $REST_RESULTS
 }
 
 # Get-JiraActiveWorkflows
@@ -796,7 +827,7 @@ function Get-JiraActiveWorkflows {
         if (-not (Test-Path $OUTPUT_FILE)) {
             New-Item -ItemType File -Path $OUTPUT_FILE -Force | Out-Null
         }
-        $CSV_DATA += "$($WORKFLOW.id.name), $($WORKFLOW.description),$($WORKFLOW.statuses | ConvertTo-Csv -UseQuotes Never -Delimiter '-' -NoHeader)"
+        $CSV_DATA += "$($WORKFLOW.id.name), $($WORKFLOW.description), $($WORKFLOW.statuses | ConvertTo-Csv -UseQuotes Never -Delimiter '-' -NoHeader)"
             
     }
     $CSV_DATA | Out-File -FilePath $OUTPUT_FILE
@@ -895,53 +926,6 @@ function Get-JSMService {
     }
 }
 
-# Function to list Opsgenie services
-function Get-OpsgenieServices {
-    $OPSGENIE_SERVICES_ENDPOINT = "https://$($env:AtlassianPowerKit_OpsgenieAPIEndpoint)/v1/services?limit=100&order=asc&offset="
-    $OFFSET = 0
-    $FINALPAGE = $false
-    # Loop through all pages of results and write to a single JSON file
-    function collectServices {
-        # Create output file with "$OPSGENIE_SERVICES_ENDPOINT-Services-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
-        $OUTPUT_FILE = "$($env:AtlassianPowerKit_OpsgenieAPIEndpoint)-Services-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
-        if (-not (Test-Path $OUTPUT_FILE)) {
-            New-Item -ItemType File -Path $OUTPUT_FILE
-        }
-        # Start JSON file entry with: { "key": "OpsServiceList", "value": {"Services": [
-        $OUTPUT_FILE_CONTENT = "{ `"key`": `"$($env:AtlassianPowerKit_OpsgenieAPIEndpoint)-Services`", `"value`": { `"Services`": ["
-        $OUTPUT_FILE_CONTENT | Out-File -FilePath $OUTPUT_FILE
-        # Loop through all pages of results and write to the $OUTPUT_FILE (append)
-        do {
-            Write-Debug "Getting services from $OPSGENIE_SERVICES_ENDPOINT$OFFSET"
-            $REST_RESULTS = Invoke-RestMethod -Uri "$OPSGENIE_SERVICES_ENDPOINT$OFFSET" -Headers $($env:AtlassianPowerKit_OpsgenieAPIHeaders) -Method Get -ContentType 'application/json'
-            $REST_RESULTS.data | ForEach-Object {
-                # Append to file { "id": "$_.id", "name": "$_.name"} ensuring double quotes are used
-                $OUTPUT_FILE_CONTENT = "{ `"id`": `"$($_.id)`", `"name`": `"$($_.name)`" }, "
-                $OUTPUT_FILE_CONTENT | Out-File -FilePath $OUTPUT_FILE -Append
-            }
-            #$REST_RESULTS | ConvertTo-Json -Depth 10 | Write-Debug
-            # Get next page offset value from   "paging": { 'last': 'https://api.opsgenie.com/v1/services?limit=100&sort=name&offset=100&order=desc'
-            if ((($REST_RESULTS.paging.last -split 'offset=')[-1] -split '&')[0] -gt $OFFSET) {
-                $OFFSET += 100
-            }
-            else {
-                $FINALPAGE = $true
-                # remove the last comma from the file, replace with ]}, ensuring the entire line is written not repeated
-                $content = Get-Content $OUTPUT_FILE
-                $content[-1] = $content[-1] -replace '},', '}]}}'
-                $content | Set-Content $OUTPUT_FILE
-                # Test if valid JSON and write to console if it is
-                if (Test-Json -Path $OUTPUT_FILE) {
-                    Write-Debug "Opsgenie Services JSON file created: $OUTPUT_FILE"
-                }
-                else {
-                    Write-Debug "Opsgenie Services JSON file not created: $OUTPUT_FILE"
-                }
-            }
-        } until ($FINALPAGE)
-    }
-    collectServices
-}
 
 # Funtion to list project properties (JIRA entities)
 function Get-JiraProjectIssuesTypes {
@@ -974,11 +958,14 @@ function Get-JiraProjectIssuesTypes {
         "{""Issue Type"": ""$($issueType.name)"", ""FieldInfo"":" | Out-File -FilePath $OUTPUT_FILE -Append
         $ISSUE_FIELDS | ConvertTo-Json -Depth 10 | Out-File -FilePath $OUTPUT_FILE -Append
         # Add a comma to the end of the file to separate the issue types
-        '},' | Out-File -FilePath $OUTPUT_FILE -Append
+        '
+    }, ' | Out-File -FilePath $OUTPUT_FILE -Append
     }
     # Remove the last comma from the file, replace with ]}, ensuring the entire line is written not repeated
     $content = Get-Content $OUTPUT_FILE
-    $content[-1] = $content[-1] -replace '},', '}]}'
+    $content[-1] = $content[-1] -replace '
+}, ', '
+}] }'
     $PARSED = $content | ConvertFrom-Json
     # Write the content back to the file ensuring JSON formatting is correc
     $PARSED | ConvertTo-Json -Depth 30 | Set-Content $OUTPUT_FILE
@@ -1002,6 +989,22 @@ function Get-JiraCloudIssueTypeMetadata {
 }
 
 # Funtion to print the value project properties (JIRA entity)
+function Get-JiraProjectList {
+    param (
+        [Parameter(Mandatory = $false)]
+        [string]$PROJECT_KEY
+    )
+    $REST_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/project/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+    $REST_RESULTS += $REST_RESPONSE.values
+    while (!$REST_RESPONSE.isLast) {
+        $REST_RESPONSE = Invoke-RestMethod -Uri $REST_RESPONSE.nextPage -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+        $REST_RESULTS += $REST_RESPONSE.values
+    }
+    if ($PROJECT_KEY) {
+        $REST_RESULTS = $REST_RESULTS | Where-Object { $_.key -eq $PROJECT_KEY }
+    }
+    return $REST_RESULTS | ConvertTo-Json -Depth 50
+}
 function Get-JiraProjectProperties {
     param (
         [Parameter(Mandatory = $true)]
@@ -1047,7 +1050,7 @@ function Set-JiraProjectProperty {
     }
     catch {
         Write-Debug "File not found or invalid JSON: $JSON_FILE"
-        $content | Convert-FromJson
+        $content | ConvertFrom-Json | Out-Null
         return
     }
     $REST_RESULTS = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/project/$JiraCloudProjectKey/properties/$PROPERTY_KEY" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Put -Body $content -ContentType 'application/json'

@@ -1,0 +1,95 @@
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "content": {
+        "type": "AdaptiveCard",
+        "body": [
+          {
+            "type": "ColumnSet",
+            "columns": [
+              {
+                "type": "Column",
+                "items": [
+                  {
+                    "type": "Icon",
+                    "name": "BuildingLighthouse"
+                  }
+                ],
+                "width": "auto"
+              },
+              {
+                "type": "Column",
+                "items": [
+                  {
+                    "type": "TextBlock",
+                    "weight": "bolder",
+                    "text": "<<SCRIPT_NAME>> - <<OUTCOME_MESSAGE>>",
+                    "wrap": true
+                  },
+                  {
+                    "type": "TextBlock",
+                    "spacing": "none",
+                    "text": "Executed: <<TIMESTAMP>>",
+                    "isSubtle": true,
+                    "wrap": true
+                  }
+                ],
+                "width": "stretch"
+              }
+            ]
+          },
+          {
+            "type": "FactSet",
+            "facts": <<FACTS_JSON>>
+          },
+          {
+            "type": "RichTextBlock",
+            "fontType": "Monospace",
+            "size": "Small",
+            "separator": true,
+            "isVisible": false,
+            "wrap": true,
+            "id": "outputText",
+                "inlines": [
+                    {
+                        "type": "TextRun",
+                        "fontType": "Monospace",
+                        "size": "Small",
+                        "text": "<<LOG_DATA>>"
+                    }
+                ]
+          }
+        ],
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.5",
+        "actions": [
+          {
+            "type": "Action.ToggleVisibility",
+            "title": "Show Output",
+            "targetElements": [
+                {
+                    "elementId": "outputText",
+                    "isVisible": true
+                }
+            ]
+        },
+          {
+            "type": "Action.ToggleVisibility",
+            "title": "Hide Output",
+            "targetElements": [
+                {
+                    "elementId": "outputText",
+                    "isVisible": false
+                }
+            ]
+        }
+        ],
+        "msteams": {
+          "width": "Full"
+        }
+      }
+    }
+  ]
+}
