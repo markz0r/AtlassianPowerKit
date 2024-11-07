@@ -44,7 +44,7 @@ function Get-AtlassianGroupMembersBulk {
         # Check if the group has members
         $MEMBER_ENTRY_ARRAY = Get-AtlassianGroupMembers -GROUP_NAME $_.Key
         if ((!$MEMBER_ENTRY_ARRAY) -or $MEMBER_ENTRY_ARRAY.Count -eq 0) {
-            Write-Host "No members found in group $($_.Key)"
+            Write-Output "No members found in group $($_.Key)"
         }
         else {
             Write-Debug "MEMBER_ENTRY_ARRAY TYPE = $($MEMBER_ENTRY_ARRAY.getType()), COUNT = $($MEMBER_ENTRY_ARRAY.Count)"
@@ -116,7 +116,7 @@ function Get-AtlassianGroupMembers {
     catch {
         # If rate limiting,  sleep for 20 seconds then retry
         if ($_.Exception.Response.StatusCode.value__ -eq 429) {
-            Write-Host 'Rate limited. Sleeping for 20 seconds then retrying.'
+            Write-Output 'Rate limited. Sleeping for 20 seconds then retrying.'
             Start-Sleep -Seconds 20
             $REST_RESULTS = Invoke-RestMethod -Uri $GROUP_MEMBERS_ENDPOINT -Headers $HEADERS -Method Get -ContentType 'application/json'
         }
@@ -128,7 +128,7 @@ function Get-AtlassianGroupMembers {
     $MEMBERS_HASH = @()
     # Build an array of hashtables with the values, handle null values and no members
     if ($REST_RESULTS.total -eq 0) {
-        Write-Host "No members found in group $GROUP_NAME"
+        Write-Output "No members found in group $GROUP_NAME"
     }
     else {
         Write-Debug "REST_RESULTS TYPE = $($REST_RESULTS.getType())"
@@ -165,7 +165,7 @@ function Get-AllAtlassianUsers {
     $USERS_HASH_ARRAY = @()
     # Build an array of hashtables with the values, handle null values and no members
     if ($REST_RESULTS.total -eq 0) {
-        Write-Host 'No users found'
+        Write-Output 'No users found'
     }
     else {
         # Build an array of hashtables with the values handle null values

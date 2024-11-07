@@ -56,7 +56,7 @@ function Compress-ConfluenceStorageFormat {
         [System.IO.File]::WriteAllText($compressedFilePath, $compressedXml)
     }
     catch {
-        Write-Host "Failed to load or compress XML content: $_"
+        Write-Output "Failed to load or compress XML content: $_"
         return
     }
 

@@ -257,7 +257,7 @@ function Get-JSONFieldsWithData {
         'aws-json-field__b72236ec-c3c4-43ea-a646-84d08f224ab5', 'statuscategorychangedate', 'versions', 'timeestimate', 'status', 'creator', 'aggregateprogress', 'workratio', 'issuerestriction', 'created', 'votes', 'customfield_10022', 'lastViewed', 'customfield_10074', 'customfield_10073', 'customfield_10061', 'customfield_10060', 'customfield_10142')
     $DATA_FIELD_LIST = @{}
     $JIRA_FIELD_ARRAY = Get-JiraFields
-    Write-Host "JIRA_FIELD_ARRAY: $($JIRA_FIELD_ARRAY.Count)"
+    Write-Output "JIRA_FIELD_ARRAY: $($JIRA_FIELD_ARRAY.Count)"
     $JIRA_FIELD_ARRAY | ForEach-Object {
         Write-Debug "JIRA_FIELD_ARRAY: $($_.name), $($_.id), $($_.custom)"
     } 

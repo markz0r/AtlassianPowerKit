@@ -6,15 +6,15 @@ function ParseJIRAIssueJSONForConfluence {
     )
     $REPLACE_FILTER = @{}
 
-    # Write-Host "JSON_PART_FILE: $JSON_PART_FILE"  
+    # Write-Output "JSON_PART_FILE: $JSON_PART_FILE"  
     $HASH_ARRAYLIST = @(
         Get-Content $JSON_PART_FILE -Raw | ConvertFrom-Json -Depth 100 | ForEach-Object {
     
             $ISSUE_Key = $_.key
             $ISSUE_FIELDS = $_.fields
-            # Write-Host '----------------------'
-            # Write-Host "Key: $ISSUE_Key"
-            # Write-Host 'FIELDS:  --------------'
+            # Write-Output '----------------------'
+            # Write-Output "Key: $ISSUE_Key"
+            # Write-Output 'FIELDS:  --------------'
             $FIELDS_HASH = @{}
             $ISSUE_FIELDS | Get-Member -MemberType Properties | ForEach-Object {
                 #Write-Debug "------- $($ISSUE_Key): $($_.Name) -------"
@@ -49,7 +49,7 @@ function ParseJIRAIssueJSONForConfluence {
                         }
                         'System.Object[]' {
                             # Handle array values
-                            #Write-Host 'Array value:'
+                            #Write-Output 'Array value:'
                             $RETURN_STRING += $FIELD_VALUE | ForEach-Object {
                                 $RETURN_STRING += "$_"
                             }

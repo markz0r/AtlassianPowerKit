@@ -197,7 +197,7 @@ function Get-PopulatedTemplate {
                 $value = $value -join ', '
             }
 
-            Write-Host "Key: $key, ValueDataType: $valueDataType, Value: $value"
+            Write-Output "Key: $key, ValueDataType: $valueDataType, Value: $value"
         }
     }
     return $Content

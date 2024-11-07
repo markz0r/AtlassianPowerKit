@@ -108,7 +108,6 @@ function Update-GRCosmConfRegister {
     Write-Debug 'Update-GRCosmConfRegister: GRCOSM_REGISTER_TABLE_DATA replaced'
     Write-Debug "Type: $($UPDATED_PAGE_STORAGE_DATA.GetType())"
     Write-Debug '############################  STORAGE FORMAT TO SEND ################################################'
-    #Write-Host $UPDATED_PAGE_STORAGE_DATA -ForegroundColor Green -BackgroundColor Black
     $UPDATED_PAGE_STORAGE_DATA | Out-File "$BASTORAGE FORMAT TO SEND ################################################ `n `n `n"
     Write-Debug "$BACKUP_FILE_BASE-LATEST.xml"
     Set-ConfluencePageContent -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_ID $CONF_PAGE_ID -CONFLUENCE_PAGE_STORAGE_FILE "$BACKUP_FILE_BASE-LATEST.xml"
@@ -144,7 +143,7 @@ function Get-OSMPlaceholdersJira {
             if ($placeholder) {
                 $placeholder | ForEach-Object { 
                     # Write output in red
-                    Write-Host "#### PLACEHOLDER FOUND!!! See: $($FILE.FullName): $_" -ForegroundColor Red
+                    Write-Output "#### PLACEHOLDER FOUND!!! See: $($FILE.FullName): $_"
                     $PLACEHOLDERS += , ($($FILE.NAME), $_) }
             }
             else {
@@ -202,7 +201,7 @@ function Get-OSMPlaceholdersConfluence {
             if ($placeholder) {
                 $placeholder | ForEach-Object { 
                     # Write output in red
-                    Write-Host "#### PLACEHOLDER FOUND!!! See: $($FILE.FullName): $_" -ForegroundColor Red
+                    Write-Output "#### PLACEHOLDER FOUND!!! See: $($FILE.FullName): $_"
                     $PLACEHOLDERS += , ($($FILE.NAME), $_) }
             }
             else {
