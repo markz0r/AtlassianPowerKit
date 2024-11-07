@@ -1,18 +1,13 @@
 # AtlassianPowerKit
 
-- Various functions in PowerShell to interact with JIRA Cloud APIs
-
-## TODO
-
-## Maybe
-
-- 1password vault integration
+- Various functions in PowerShell to interact with Atlassian Cloud APIs
 
 ## Quick Start
 
 ```powershell
-git clone https://github.com/markz0r/AtlassianPowerKit.git
-cd .\AtlassianPowerKit; Import-Module "AtlassianPowerKit.psd1" -Force
+git clone https://github.com/OrganisationServiceManagement/AtlassianPowerKit.git
+cd .\AtlassianPowerKit; Import-Module "AtlassianPowerKit.psd1"
+AtlassianPowerKit
 ```
 
 ## Usage
@@ -20,8 +15,8 @@ cd .\AtlassianPowerKit; Import-Module "AtlassianPowerKit.psd1" -Force
 ```powershell
 # Text UI
 AtlassianPowerKit
-# Direct invocation
-Invoke-AtlassianPowerKitFunction -FunctionName "Get-JiraIssue" -FunctionParameters @{"Key"="TEST-1"} -Profile "zoak"
+# Direct invocation (after profile configured)
+AtlassianPowerKitFunction -FunctionName "Get-JiraIssue" -FunctionParameters @{"Key"="TEST-1"} -Profile "zoak"
 ```
 
 ## Prerequisites
