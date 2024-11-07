@@ -487,3 +487,16 @@ function Update-AtlassianPowerKitVault {
     }
     Write-Debug "Vault entruy for $ProfileName updated successfully."
 }
+
+function Remove-AtlasianPowerKitProfile {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$ProfileName
+    )
+    Write-Debug "Removing profile $ProfileName..."
+    if ($ProfileName -eq $env:AtlassianPowerKit_PROFILE_NAME) {
+        Clear-AtlassianPowerKitProfile
+    }
+    Remove-Secret -Name $ProfileName -Vault $script:VAULT_NAME
+    Write-Debug "Profile $ProfileName removed."
+}

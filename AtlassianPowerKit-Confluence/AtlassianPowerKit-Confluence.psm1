@@ -250,7 +250,7 @@ function Export-ConfluencePageStorageFormatForChildren {
         [Parameter(Mandatory = $false)]
         [int]$DepthCount = 0
     )
-    $PARENT_PAGE = Get-ConfluencePageByTitle -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_TITLE $CONFLUENCE_PARENT_PAGE_TITLE -CONFLUENCE_PAGE_FORMAT 'export_view'
+    $PARENT_PAGE = Get-ConfluencePageByTitle -CONFLUENCE_SPACE_KEY $CONFLUENCE_SPACE_KEY -CONFLUENCE_PAGE_TITLE $CONFLUENCE_PARENT_PAGE_TITLE
     if (!$PARENT_PAGE) {
         throw "Parent page does not exist: $CONFLUENCE_PARENT_PAGE_TITLE"
     }

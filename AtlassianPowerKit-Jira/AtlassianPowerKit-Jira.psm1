@@ -456,7 +456,9 @@ function Get-JiraCloudJQLQueryResult {
         [Parameter(Mandatory = $false)]
         [string[]]$RETURN_FIELDS,
         [Parameter(Mandatory = $false)]
-        [switch]$IncludeEmptyFields = $false
+        [switch]$IncludeEmptyFields = $false,
+        [Parameter(Mandatory = $false)]
+        [switch]$ReturnJSONOnly = $false
     )
     $OUTPUT_DIR = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA\$($env:AtlassianPowerKit_PROFILE_NAME)"
     $OUTPUT_FILE = "$OUTPUT_DIR\JIRA-Query-Results-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
@@ -518,17 +520,23 @@ function Get-JiraCloudJQLQueryResult {
         Write-Debug "JSON_OBJECT_ARRAY_COUNT: $($JSON_OBJECT_ARRAY.Count)"
         $JSON_OBJECT_ARRAY
     }
-    Write-Debug "COMBINED_ISSUES: $($COMBINED_ISSUES.GetType())'
-        Write-Debug 'COMBINED_ISSUES Count: $($COMBINED_ISSUES.Count)"
-    if (!$IncludeEmptyFields) {
+    Write-Debug "COMBINED_ISSUES: $($COMBINED_ISSUES.GetType())"
+    Write-Debug "COMBINED_ISSUES Count: $($COMBINED_ISSUES.Count)"
+    if ($IncludeEmptyFields -eq $false) {
+        Write-Debug 'Cleaning empty fields...'
         $CLEAN_ISSUES = $COMBINED_ISSUES | ForEach-Object {
             $ISSUE = $_
             #Write-Debug "Processing issue: $($ISSUE.key)"
-            $FIELDS_ARRAY = $_.fields
+            $ISSUE | ConvertTo-Json -Depth 100 | Write-Debug
+            $FIELDS_ARRAY = $ISSUE.fields
             #Write-Debug "FIELDS ARRAY TYPE IS: $($FIELDS_ARRAY.GetType())'
             #Write-Debug 'FIELD COUNT FOR ISSUE: $($FIELDS_ARRAY.Count)"
+            Write-Debug "Cleaning fields for issue: $($ISSUE.key)"
+            Write-Debug "FIELDS_ARRAY: $($FIELDS_ARRAY.GetType())"
+            Write-Debug "FIELDS_ARRAY Count: $($FIELDS_ARRAY.Count)"
             $CLEAN_FIELD_ARRAY = Clear-EmptyFields -Object $FIELDS_ARRAY
             # Replace the fields array with the cleaned fields array in the issue object
+            Write-Debug "Updating Issue.fields using CLEAN_FILED_ARRAY: $($CLEAN_FIELD_ARRAY.GetType())"
             $ISSUE.fields = $CLEAN_FIELD_ARRAY
             return $ISSUE
         }
@@ -557,12 +565,19 @@ function Get-JiraCloudJQLQueryResult {
             }
         }
     }
-    $COMBINED_ISSUES | ConvertTo-Json -Depth 100 -Compress | Out-File -FilePath $OUTPUT_FILE
-    Write-Debug "JIRA COMBINED Query results written to: $OUTPUT_FILE"
-    #Write-Debug '########## Get-JiraCloudJQLQueryResult completed, OUTPUT_FILE_LIST: '
-    #$OUTPUT_FILE_LIST | Write-Debug
-    # Combine raw, compressed JSON files into a single JSON file that is valid JSON
-    return $OUTPUT_FILE_LIST
+    if ($ReturnJSONOnly) {
+        Write-Debug 'Returning JSON only...'
+        $COMBINED_ISSUES | ConvertTo-Json -Depth 100 | Write-Debug
+        return $($COMBINED_ISSUES | ConvertTo-Json -Depth 100 -Compress)
+    }
+    else {
+        $COMBINED_ISSUES | ConvertTo-Json -Depth 100 -Compress | Out-File -FilePath $OUTPUT_FILE
+        Write-Debug "JIRA COMBINED Query results written to: $OUTPUT_FILE"
+        #Write-Debug '########## Get-JiraCloudJQLQueryResult completed, OUTPUT_FILE_LIST: '
+        #$OUTPUT_FILE_LIST | Write-Debug
+        # Combine raw, compressed JSON files into a single JSON file that is valid JSON
+        return $OUTPUT_FILE_LIST
+    }
 }
 
 
@@ -1305,23 +1320,59 @@ function Set-IssueLinkTypeByJQL {
         }
     }
 }
-     
 
-# Function to remove forms from JQL query results
-function Remove-FormsFromJQLQueryResults {
+function Add-FormsFromJQLQueryResults {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$JQL_STRING
+        [string]$JQL_STRING,
+        [Parameter(Mandatory = $true)]
+        [string]$FORM_ID,
+        [Parameter(Mandatory = $false)]
+        [switch]$InternalOnlyVisible = $false
     )
-    $ISSUE_FORM_ID_URL = "https://api.atlassian.com/jira/forms/cloud/$($env:AtlassianPowerKit_CloudID)/issue"
     # /{issueIdOrKey}/form
-    $REST_RESULTS = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -RETURN_FIELDS @('id', 'key')
-    $REST_RESULTS.issues | ForEach-Object {
-        $ATTACHED_FORM_ID = Invoke-RestMethod -Uri "$ISSUE_FORM_ID_URL/$($_.id)/form" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
-        if ($ATTACHED_FORM_ID.id) {
-            Write-Debug "Issue Key: $($_.key) - Form ID: $($ATTACHED_FORM_ID.id), Removing..."
+    $COMBINED_ISSUES_JSON = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -RETURN_FIELDS @('id', 'key') -ReturnJSONOnly -IncludeEmptyFields
+    $COMBINED_ISSUES = $COMBINED_ISSUES_JSON | ConvertFrom-Json
+    Write-Debug "JQL Query results: $($COMBINED_ISSUES.Count)"
+    $COMBINED_ISSUES | ForEach-Object {
+        $ISSUE = $_
+        #https://api.atlassian.com/jira/forms/cloud/{cloudId}/issue/{issueIdOrKey}/form'
+        $ISSUE_FORM_ID_URL = "https://api.atlassian.com/jira/forms/cloud/$($env:AtlassianPowerKit_CloudID)/issue/$($ISSUE.key)/form"
+        Write-Debug "Attaching form ($FORM_ID) to issue: $($ISSUE.key)"
+        Write-Debug "URL: $ISSUE_FORM_ID_URL"
+        $PAYLOAD = @{
+            formTemplate = @{
+                id = $FORM_ID
+            }
+        }
+        $PAYLOAD | ConvertTo-Json -Depth 10 | Write-Debug
+        try {
+            Invoke-RestMethod -Uri $ISSUE_FORM_ID_URL -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body ($PAYLOAD | ConvertTo-Json -Depth 10) -ContentType 'application/json'
+        }
+        catch {
+            Write-Debug "$($MyInvocation.InvocationName) - Failed to attach form ($FORM_ID) to issue: $($ISSUE.key)"
+            Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
+            Write-Error "Error updating field: $($_.Exception.Message)"
+        }
+    }
+}
+function Set-AttachedFormsExternal {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$ISSUE_KEY
+    )
+    # https://api.atlassian.com/jira/forms/cloud/{cloudId}/issue/{issueIdOrKey}/form
+    $ISSUE_FORM_ATTACHMENTS_URL = "https://api.atlassian.com/jira/forms/cloud/$($env:AtlassianPowerKit_CloudID)/issue/$ISSUE_KEY/form"
+    Write-Debug "Getting attached forms for issue: $ISSUE_KEY"
+    Write-Debug "URL: $ISSUE_FORM_ATTACHMENTS_URL"
+    $ATTACHED_FORMS = Invoke-RestMethod -Uri $ISSUE_FORM_ATTACHMENTS_URL -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+    $ATTACHED_FORMS | ForEach-Object {
+        $ATTACHED_FORM = $_
+        if ($ATTACHED_FORM.internal -eq $true) {
+            Write-Debug "Changing form ($($ATTACHED_FORM.id)) to external for issue: $ISSUE_KEY"             
             try {
-                Invoke-RestMethod -Uri "$ISSUE_FORM_ID_URL/$($_.id)/form/$($ATTACHED_FORM_ID.id)" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Delete
+                #https://api.atlassian.com/jira/forms/cloud/{cloudId}/issue/{issueIdOrKey}/form/{formId}/action/external' \
+                Invoke-RestMethod -Uri "$ISSUE_FORM_ATTACHMENTS_URL/$($ATTACHED_FORM.id)/action/external" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Put
             }
             catch {
                 Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
@@ -1329,7 +1380,95 @@ function Remove-FormsFromJQLQueryResults {
             }
         }
         else {
-            Write-Debug "No form found for issue: $($_.key)"
+            Write-Debug "No form found for issue: $($ISSUE.key)"
+        }
+    }
+}
+function Set-AttachedFormsExternalJQLQuery {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$JQL_STRING
+    )
+    # /{issueIdOrKey}/form
+    $COMBINED_ISSUES_JSON = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -RETURN_FIELDS @('id', 'key') -ReturnJSONOnly -IncludeEmptyFields
+    $COMBINED_ISSUES = $COMBINED_ISSUES_JSON | ConvertFrom-Json
+    Write-Debug "JQL Query results: $($COMBINED_ISSUES.Count)"
+    $COMBINED_ISSUES | ForEach-Object {
+        $ISSUE = $_
+        Set-AttachedFormsExternal -ISSUE_KEY $ISSUE.key
+    }
+}
+function Get-FormsForJiraProject {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$JiraCloudProjectKey
+    )
+    # https://api.atlassian.com/jira/forms/cloud/{cloudId}/project/{projectIdOrKey}/form
+    $PROJECT_FORM_ID_URL = "https://api.atlassian.com/jira/forms/cloud/$($env:AtlassianPowerKit_CloudID)/project/$JiraCloudProjectKey/form"
+    $REST_RESULTS = Invoke-RestMethod -Uri $PROJECT_FORM_ID_URL -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+    Write-Debug $REST_RESULTS.getType()
+    Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
+}
+function Get-FormsForJiraIssue {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$ISSUE_KEY
+    )
+    # https://api.atlassian.com/jira/forms/cloud/{cloudId}/project/{projectIdOrKey}/form
+    $ISSUE_FORM_ID_URL = "https://api.atlassian.com/jira/forms/cloud/$($env:AtlassianPowerKit_CloudID)/issue/$ISSUE_KEY/form"
+    $REST_RESULTS = Invoke-RestMethod -Uri $ISSUE_FORM_ID_URL -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+    $REST_RESULTS | ConvertTo-Json -Depth 10 | Write-Debug
+}
+
+# Function to remove forms from JQL query results
+function Remove-FormsFromJQLQueryResults {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$JQL_STRING,
+        [Parameter(Mandatory = $false)]
+        [switch]$DontReplace = $false
+    )
+    # /{issueIdOrKey}/form
+    $COMBINED_ISSUES_JSON = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -RETURN_FIELDS @('id', 'key') -ReturnJSONOnly -IncludeEmptyFields
+    $COMBINED_ISSUES = $COMBINED_ISSUES_JSON | ConvertFrom-Json
+    Write-Debug "JQL Query results: $($COMBINED_ISSUES.Count)"
+    $COMBINED_ISSUES | ForEach-Object {
+        $ISSUE = $_
+        $ISSUE_FORM_ID_URL = "https://api.atlassian.com/jira/forms/cloud/$($env:AtlassianPowerKit_CloudID)/issue/$($ISSUE.key)/form"
+        $ATTACHED_FORMS = Invoke-RestMethod -Uri "$ISSUE_FORM_ID_URL" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get
+        if ($null -eq $ATTACHED_FORMS -or $ATTACHED_FORMS -eq 0) {
+            Write-Debug "No form found for issue: $($ISSUE.key)"
+        }
+        else {
+            Write-Debug "Issue Key: $($ISSUE.key) - ATTACHED_FORMS to remove: "
+            Write-Debug "ATTACHED FORMS COUNT: $($ATTACHED_FORMS.Count)"
+            $ATTACHED_FORMS | ConvertTo-Json -Depth 10 | Write-Debug
+            $ATTACHED_FORMS | ForEach-Object {
+                $ATTACHED_FORM = $_
+                $FORM_TEMPLATE_ID = $ATTACHED_FORM.formTemplate.id
+                Write-Debug "Issue Key: $($ISSUE.key) - Form ID: $($ATTACHED_FORM.id), FORM TEMPLATE ID: $($ATTACHED_FORM.formTemplate.id) - Removing..."
+                try {
+                    $DELETE_FORM_RESULT = Invoke-RestMethod -Uri "$ISSUE_FORM_ID_URL/$($ATTACHED_FORM.id)" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Delete
+                    $DELETE_FORM_RESULT | ConvertTo-Json -Depth 10 | Write-Debug
+                    if (! $DontReplace) {
+                        $PAYLOAD = @{
+                            formTemplate = @{
+                                id = $FORM_TEMPLATE_ID
+                            }
+                        }
+                        Write-Debug "Re-attaching form ($FORM_TEMPLATE_ID) to issue: $($ISSUE.key)"
+                        Invoke-RestMethod -Uri $ISSUE_FORM_ID_URL -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body ($PAYLOAD | ConvertTo-Json -Depth 10) -ContentType 'application/json'
+                        Set-AttachedFormsExternal -ISSUE_KEY $($ISSUE.key)
+                    } 
+                    else {
+                        Write-Debug "Not re-attaching form to issue: $($ISSUE.key)"
+                    }
+                }
+                catch {
+                    Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
+                    Write-Error "Error updating field: $($_.Exception.Message)"
+                }
+            }
         }
     }
 }

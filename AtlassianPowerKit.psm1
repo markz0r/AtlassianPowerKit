@@ -88,9 +88,7 @@ function Invoke-AtlassianPowerKitFunction {
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $stopwatch.Start()
     if ($FunctionParameters) {
-        $singleLineDefinition = $FunctionParameters.GetEnumerator() | ForEach-Object { 
-            "$($_.Key)=$($_.Value)" 
-        } -join ', '
+        $singleLineDefinition = $FunctionParameters.Keys | ForEach-Object { "-   ->    $_ = $($FunctionParameters.($_))" }
         Write-Debug "Running function: $FunctionName with parameters: $singleLineDefinition"
         & $FunctionName @FunctionParameters
     }
@@ -122,7 +120,7 @@ function Show-AtlassianPowerKitFunctions {
     )
     $selectedFunction = $null
     # Remove AtlassianPowerKit-Shard and AtlassianPowerKit-UsersAndGroups from the nested modules
-    $NESTED_MODULES = $NESTED_MODULES | Where-Object { $_ -ne 'AtlassianPowerKit-Shared' -and $_ -ne 'AtlassianPowerKit-UsersAndGroups' }
+    $NESTED_MODULES = $NESTED_MODULES | Where-Object { $_ -ne 'AtlassianPowerKit-UsersAndGroups' }
     # List nested modules and their exported functions to the console in a readable format, grouped by module
     $colors = @('Green', 'Cyan', 'Red', 'Magenta', 'Yellow', 'Blue', 'Gray')
     $colorIndex = 0
@@ -244,6 +242,7 @@ function Show-AtlassianPowerKitProfileList {
         }
     }   
     Write-Host '[N] Create a new profile'
+    Write-Host '[D] Delete a profile'
     Write-Host '[A] Admin (danger) functions'
     Write-Host '[Q / Return] Quit'
     Write-Host '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++' -ForegroundColor DarkGray
@@ -262,6 +261,9 @@ function Show-AtlassianPowerKitProfileList {
     } 
     elseif ($selectedProfile -eq 'A') {
         Show-AdminFunctions
+    }
+    elseif ($selectedProfile -eq 'D') {
+        Remove-AtlasianPowerKitProfile
     }
     else {
         $selectedProfile = [int]$selectedProfile
@@ -349,7 +351,7 @@ function AtlassianPowerKit {
     finally {
         #Clear-AtlassianPowerKitProfile
         Pop-Location
-        Remove-Item 'env:AtlassianPowerKit_*' -ErrorAction Continue
+        #Remove-Item 'env:AtlassianPowerKit_*' -ErrorAction Continue
         Write-Debug 'Gracefully exited AtlassianPowerKit'
     }
 }
