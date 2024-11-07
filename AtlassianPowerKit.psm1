@@ -21,7 +21,26 @@
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
-
+function Get-RequisitePowerKitModules {
+    $AtlassianPowerKitRequiredModules = @('PowerShellGet', 'Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
+    $AtlassianPowerKitRequiredModules | ForEach-Object {
+        # Import or install the required module
+        if (-not (Get-Module -Name $_ -ErrorAction Continue)) {
+            try {
+                if (-not (Get-Module -Name $_ -ListAvailable)) {
+                    Write-Debug "Module $_ not found. Installing..."
+                    Install-Module -Name $_ -Force -Scope CurrentUser | Write-Debug
+                }            
+            }
+            catch {
+                Write-Error "Module $_ not found and installation failed. Exiting."
+                throw "Dependency module $_ unanable to install, try manual install, Exiting for now."
+            }
+            Import-Module -Name $_ -Force | Write-Debug
+        }
+    }
+    return $true
+}
 function Import-NestedModules {
     param (
         [Parameter(Mandatory = $true)]
@@ -290,11 +309,11 @@ function AtlassianPowerKit {
         [Parameter(Mandatory = $false)]
         [switch] $ClearProfile
     )
-    $NESTED_MODULES = Import-NestedModules -NESTED_MODULES @('AtlassianPowerKit-Shared', 'AtlassianPowerKit-Jira', 'AtlassianPowerKit-Confluence', 'AtlassianPowerKit-GRCosm', 'AtlassianPowerKit-JSM', 'AtlassianPowerKit-UsersAndGroups')
     if (!$env:AtlassianPowerKit_RequisiteModules) {
         $env:AtlassianPowerKit_RequisiteModules = Get-RequisitePowerKitModules
         Write-Debug 'AtlassianPowerKit_RequisiteModules - Required modules imported'
     }
+    $NESTED_MODULES = Import-NestedModules -NESTED_MODULES @('AtlassianPowerKit-Shared', 'AtlassianPowerKit-Jira', 'AtlassianPowerKit-Confluence', 'AtlassianPowerKit-GRCosm', 'AtlassianPowerKit-JSM', 'AtlassianPowerKit-UsersAndGroups')
     try {
         #Push-Location -Path $PSScriptRoot -ErrorAction Continue
         Write-Debug "Starting AtlassianPowerKit, running from $((Get-Item -Path $PSScriptRoot).FullName)"

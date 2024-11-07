@@ -37,26 +37,6 @@ $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 $VAULT_NAME = 'AtlassianPowerKitProfileVault'
 $VAULT_KEY_PATH = 'vault_key.xml'
 
-function Get-RequisitePowerKitModules {
-    $AtlassianPowerKitRequiredModules = @('PowerShellGet', 'Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
-    $AtlassianPowerKitRequiredModules | ForEach-Object {
-        # Import or install the required module
-        if (-not (Get-Module -Name $_ -ErrorAction Continue)) {
-            try {
-                if (-not (Get-Module -Name $_ -ListAvailable)) {
-                    Write-Debug "Module $_ not found. Installing..."
-                    Install-Module -Name $_ -Force -Scope CurrentUser | Write-Debug
-                }            
-            }
-            catch {
-                Write-Error "Module $_ not found and installation failed. Exiting."
-                throw "Dependency module $_ unanable to install, try manual install, Exiting for now."
-            }
-            Import-Module -Name $_ -Force | Write-Debug
-        }
-    }
-    return $true
-}
 function Clear-AtlassianPowerKitProfile {
     # Clear all environment variables starting with AtlassianPowerKit_
     Get-ChildItem env:AtlassianPowerKit_* | ForEach-Object {
@@ -221,7 +201,9 @@ function Register-AtlassianPowerKitVault {
         # Create a random secure key to use as the vault key as protected data
         $VAULT_KEY = $null
         while (-not $VAULT_KEY -or $VAULT_KEY.Length -lt 16) {
-            $VAULT_KEY = Read-Host -Prompt 'Enter a at least 16 random characters to use as the vault key' -AsSecureString
+            $VAULT_KEY = [System.Convert]::ToBase64String([System.Security.Cryptography.RNGCryptoServiceProvider]::GetBytes(32))
+            # Convert the key to a secure string and export it to a file
+            $VAULT_KEY = ConvertTo-SecureString -String $VAULT_KEY -AsPlainText -Force
             $VAULT_KEY | Export-Clixml -Path $VAULT_KEY_PATH
         }
         # Write the vault key to a temporary file
