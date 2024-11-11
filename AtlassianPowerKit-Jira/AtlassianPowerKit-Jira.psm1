@@ -67,6 +67,8 @@ GitHub: https://github.com/markz0r/AtlassianPowerKit
 
 #>
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
+# Directory of this file 
+Import-Module "$env:OSM_INSTALL\AtlassianPowerKit\AtlassianPowerKit-Shared\AtlassianPowerKit-Shared.psd1" -Force
 $REQ_SLEEP_SEC = 1
 $REQ_SLEEP_SEC_LONG = 10
 function Convert-JiraIssueToTableRow {
@@ -87,6 +89,158 @@ function Convert-JiraIssueToTableRow {
     $TABLE_ROW += '</tr>'
     $TABLE_ROW 
     return $TABLE_ROW
+}
+
+function Export-RestorableJiraBackupJQL {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$JQL_STRING
+    )
+    $OUTPUT_DIR = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA\Exported-Backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    if (-not (Test-Path $OUTPUT_DIR)) {
+        New-Item -ItemType Directory -Path $OUTPUT_DIR -Force | Out-Null
+    }
+    $JIRA_ISSUES = Get-JiraCloudJQLQueryResult -JQL_STRING $JQL_STRING -ReturnJSONOnly
+    $JIRA_ISSUES | ConvertFrom-Json -Depth 100 | ForEach-Object {
+        $ISSUE = $_
+        $ISSUE_KEY = $ISSUE.key
+        Write-Debug "Exporting issue: $ISSUE_KEY to $OUTPUT_DIR\$ISSUE_KEY ..."
+        if (-not (Test-Path "$OUTPUT_DIR\$ISSUE_KEY")) {
+            New-Item -ItemType Directory -Path "$OUTPUT_DIR\$ISSUE_KEY" -Force | Out-Null
+        }
+        $ISSUE | ConvertTo-Json -Depth 100 | Out-File -FilePath "$OUTPUT_DIR\$ISSUE_KEY\$ISSUE_KEY.json" -Force
+        if ($ISSUE.fields.attachment) {
+            $ATTACHMENTS = $ISSUE.fields.attachment
+            $ATTACHMENTS | ForEach-Object {
+                $ATTACHMENT = $_
+                $ATTACHMENT_ID = $ATTACHMENT.id
+                $ATTACHMENT_FILENAME = $ATTACHMENT.filename
+                Write-Debug "Exporting attachment: $OUTPUT_DIR\$ISSUE_KEY\$ATTACHMENT_FILENAME ..."
+                Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/attachment/content/$ATTACHMENT_ID" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType $Attachment.mimeType -OutFile "$OUTPUT_DIR\$ISSUE_KEY\$ATTACHMENT_FILENAME"
+                Write-Debug "Exporting attachment: $OUTPUT_DIR\$ISSUE_KEY\$ATTACHMENT_FILENAME ... Done"
+            }
+        }
+    }
+}
+
+function Import-JIRAIssueFromJSONBackup {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$JSON_FILE_PATH,
+        [Parameter(Mandatory = $true)]
+        [string]$DEST_PROJECT_KEY,
+        [Parameter(Mandatory = $true)]
+        [string]$DEST_ISSUE_TYPE,
+        [Parameter(Mandatory = $false)]
+        [string]$FIELD_MAP_JSON
+    )
+
+        
+    $ISSUE = Get-Content -Path $JSON_FILE_PATH | ConvertFrom-Json -Depth 100
+    if ($FIELD_MAP_JSON) {
+        Write-Debug "Field map provided: $FIELD_MAP_JSON"
+        $FIELD_MAP = Get-Content -Path $FIELD_MAP_JSON -Raw | ConvertFrom-Json -NoEnumerate -Depth 100
+    }
+    else {
+        Write-Debug 'Using manual mapping...'
+        $POST_ISSUE = @{
+            fields = @{
+                project     = @{
+                    key = $DEST_PROJECT_KEY
+                }
+                issuetype   = @{
+                    name = $DEST_ISSUE_TYPE
+                }
+                summary     = $ISSUE.fields.summary                  # Summary of the issue
+                description = $ISSUE.fields.description          # Description of the issue
+            }
+        }
+    }
+    $ISSUE_SOURCE_INFO = "Source: $($ISSUE.fields.project.key) - $($ISSUE.key) -  $($ISSUE.fields.issuetype.name) - $($ISSUE.self)"
+    $ISSUE_KEY = $ISSUE.key
+    Write-Debug "Importing issue: $ISSUE_KEY to $DEST_PROJECT_KEY as $DEST_ISSUE_TYPE ..."
+
+    $POST_COMMENT_JSON = "{
+        'version': 1,
+        'type': 'doc',
+        'content': [
+        {
+            'type': 'bulletList',
+            'content': [
+            {
+                'type': 'listItem',
+                'content': [
+                {
+                    'type': 'paragraph',
+                    'content': [
+                    {
+                        'type': 'text',
+                        'text': 'Importing Issue using AtlassianPowerKit, ``$ISSUE_SOURCE_INFO``'
+                    }
+                    ]
+                }
+                ]
+            }
+            ]
+        }
+        ]
+    }"
+    # Write-Debug 'Converting fields from issue json:'
+    # $ISSUE | ConvertTo-Json -Depth 100 | Write-Debug
+    # $ISSUE.fields | ForEach-Object {
+    #     $FIELD = $_
+    #     $FIELD_NAME = $FIELD.Key
+    #     $FIELD_VALUE = $FIELD.Value
+    #     if ($FIELD_MAP.ConvertToComments -contains $FIELD_NAME) {
+    #         Write-Debug "Converting field to comment: $FIELD_NAME"
+    #         $POST_ISSUE.fields.$FIELD_NAME = @{
+    #             body = $FIELD_VALUE
+    #         }
+    #     }
+    #     elseif ($FIELD_MAP.IgnorePatterns -contains $FIELD_NAME) {
+    #         Write-Debug "Ignoring field: $FIELD_NAME"
+    #     }
+    #     else {
+    #         Write-Debug "Adding field: $FIELD_NAME"
+    #         $POST_ISSUE.fields.$FIELD_NAME = $FIELD_VALUE
+    #     }
+    # }
+    # https://your-domain.atlassian.net/rest/api/3/issue/createmeta/{projectIdOrKey}/issuetypes' 
+    # Write-Debug 'CREATE ISSUE METADATA: '
+    # $CREATE_ISSUE_METADATA = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issue/createmeta/$DEST_PROJECT_KEY/issuetypes" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+    # $CREATE_ISSUE_METADATA | ConvertTo-Json -Depth 100 | Write-Debug
+    # return
+
+    
+    Write-Debug "POSTING ISSUE: $($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issue"
+    $POST_ISSUE | ConvertTo-Json -Depth 100 -EscapeHandling Default | Write-Debug
+    try {
+        $POST_REST_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issue" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -ContentType 'application/json' -Body $($POST_ISSUE | ConvertTo-Json -EscapeHandling Default -Depth 100)
+    }
+    catch {
+        Write-Debug "Error importing issue: $ISSUE_KEY to $DEST_PROJECT_KEY as $DEST_ISSUE_TYPE"
+        Write-Debug ($_ | Select-Object -Property * -ExcludeProperty psobject | Out-String)
+        Write-Error $_.Exception.Message
+    }
+    $NEW_ISSUE_KEY = $POST_REST_RESPONSE.key
+    Write-Debug "Successfully imported issue, new issue key: $NEW_ISSUE_KEY"
+    $ATTACHMENT_POST_HEADERS = $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders)
+    $ATTACHMENT_POST_HEADERS.Add('X-Atlassian-Token', 'no-check')
+
+    if ($ISSUE.fields.attachment) {
+        $ATTACHMENTS = $ISSUE.fields.attachment
+        $ATTACHMENTS | ForEach-Object {
+            $ATTACHMENT = $_
+            $ATTACHMENT_ID = $ATTACHMENT.id
+            $ATTACHMENT_FILENAME = $ATTACHMENT.filename
+            Write-Debug "Importing attachment: $OUTPUT_DIR\$ISSUE_KEY\$ATTACHMENT_FILENAME ..."
+            Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issue/$NEW_ISSUE_KEY/attachments/$ATTACHMENT_ID" -Headers $ATTACHMENT_POST_HEADERS -Method Post -ContentType $Attachment.mimeType -InFile "$OUTPUT_DIR\$ISSUE_KEY\$ATTACHMENT_FILENAME"
+            Write-Debug "Importing attachment: $OUTPUT_DIR\$ISSUE_KEY\$ATTACHMENT_FILENAME ... Done"
+
+        }
+    }
+    # Add comment
+    Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/issue/$NEW_ISSUE_KEY/comment" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -ContentType 'application/json' -Body $POST_COMMENT_JSON
 }
 
 function Get-JiraFilterResultsAsConfluenceTable {
@@ -460,7 +614,7 @@ function Get-JiraCloudJQLQueryResult {
         [Parameter(Mandatory = $false)]
         [switch]$ReturnJSONOnly = $false
     )
-    $OUTPUT_DIR = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA\$($env:AtlassianPowerKit_PROFILE_NAME)"
+    $OUTPUT_DIR = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA"
     $OUTPUT_FILE = "$OUTPUT_DIR\JIRA-Query-Results-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
     if (-not (Test-Path $OUTPUT_DIR)) {
         New-Item -ItemType Directory -Path $OUTPUT_DIR -Force | Out-Null
@@ -487,7 +641,7 @@ function Get-JiraCloudJQLQueryResult {
             return
         }
     }
-    $POST_BODY.expand = @('names') 
+    $POST_BODY.expand = @('names', 'renderedFields') 
     $POST_BODY.remove('startAt')
     $POST_BODY.maxResults = 100
     if ($RETURN_FIELDS -and $null -ne $RETURN_FIELDS -and $RETURN_FIELDS.Count -gt 0) {
@@ -503,7 +657,7 @@ function Get-JiraCloudJQLQueryResult {
     $OUTPUT_FILE_LIST = 0..($DYN_LIMIT / 100) | ForEach-Object -Parallel { 
         try {
             $PARTIAL_OUTPUT_FILE = ($using:OUTPUT_FILE).Replace('.json', "_$_.json")
-            $REST_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/2/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body $(@{startAt = ($_ * 100) } + $using:POST_BODY | ConvertTo-Json -Depth 10) -ContentType 'application/json'
+            $REST_RESPONSE = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/api/3/search" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Post -Body $(@{startAt = ($_ * 100) } + $using:POST_BODY | ConvertTo-Json -Depth 10) -ContentType 'application/json'
             $REST_RESPONSE.issues | ConvertTo-Json -Depth 100 -Compress | Out-File -FilePath $PARTIAL_OUTPUT_FILE
             return $PARTIAL_OUTPUT_FILE
         }
@@ -573,10 +727,13 @@ function Get-JiraCloudJQLQueryResult {
     else {
         $COMBINED_ISSUES | ConvertTo-Json -Depth 100 -Compress | Out-File -FilePath $OUTPUT_FILE
         Write-Debug "JIRA COMBINED Query results written to: $OUTPUT_FILE"
+        $OUTPUT_FILE_LIST | ForEach-Object {
+            Remove-Item -Path $_ -Force
+        }
         #Write-Debug '########## Get-JiraCloudJQLQueryResult completed, OUTPUT_FILE_LIST: '
         #$OUTPUT_FILE_LIST | Write-Debug
         # Combine raw, compressed JSON files into a single JSON file that is valid JSON
-        return $OUTPUT_FILE_LIST
+        return $OUTPUT_FILE
     }
 }
 

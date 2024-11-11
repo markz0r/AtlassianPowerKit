@@ -35,7 +35,7 @@ GitHub: https://github.com/markz0r/AtlassianPowerKit
 # Vault path: $env:LOCALAPPDATA\Microsoft\PowerShell\secretmanagement\localstore\
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 $VAULT_NAME = 'AtlassianPowerKitProfileVault'
-$VAULT_KEY_PATH = 'vault_key.xml'
+$VAULT_KEY_PATH = "$($env:OSM_HOME)\vault_key.xml"
 
 function Clear-AtlassianPowerKitProfile {
     # Clear all environment variables starting with AtlassianPowerKit_
@@ -192,6 +192,29 @@ function Get-VaultKey {
     return $VAULT_KEY
 }
 
+function New-AtlassianPowerKitProfile {
+    # Ask user to enter the profile name
+    $ProfileName = Read-Host 'Enter a profile name:'
+    $ProfileName = $ProfileName.ToLower().Trim()
+    if (!$ProfileName -or $ProfileName -eq '' -or $ProfileName.Length -gt 100) {
+        Write-Error 'Profile name cannot be empty, or more than 100 characters, Please try again.'
+        # Load the selected profile or create a new profile
+        Write-Debug "Profile name entered: $ProfileName"
+        Throw 'Profile name cannot be empty, taken or mor than 100 characters, Please try again.'
+    }
+    else {
+        try {
+            $REGISTERED_PROFILE = Register-AtlassianPowerKitProfile($ProfileName)       
+        }
+        catch {
+            Write-Debug "Error: $($_.Exception.Message)"
+            throw "Register-AtlassianPowerKitProfile $ProfileName failed. Exiting."
+        }
+    }
+    return $REGISTERED_PROFILE
+}
+
+
 function Register-AtlassianPowerKitVault {
     # Register the secret vault
     # Cheking if the vault is already registered
@@ -262,13 +285,7 @@ function Register-AtlassianPowerKitProfile {
         [Parameter(Mandatory = $true)]
         [string] $AtlassianAPIEndpoint,
         [Parameter(Mandatory = $true)]
-        [PSCredential] $AtlassianAPICredential,
-        [Parameter(Mandatory = $false)]
-        [string] $OpsgenieAPIEndpoint = 'api.opsgenie.com',
-        [Parameter(Mandatory = $false)]
-        [switch] $UseOpsgenieAPI = $false,
-        [Parameter(Mandatory = $false)]
-        [PSCredential] $OpsgenieAPICredential
+        [PSCredential] $AtlassianAPICredential
     )
     if (!$script:REGISTER_VAULT) {
         Register-AtlassianPowerKitVault
@@ -360,7 +377,8 @@ function Set-AtlassianPowerKitProfile {
     # Check if the profile exists
     $PROFILE_LIST = Get-AtlassianPowerKitProfileList
     if (!$PROFILE_LIST.Contains($SelectedProfileName)) {
-        Write-Debug "Profile $SelectedProfileName does not exists in the vault - we have: $PROFILE_LIST"
+        Write-Debug "Profile $SelectedProfileName does not exists in the vault - we have: $PROFILE_LIST, creating... $SelectedProfileName"
+        New-AtlassianPowerKitProfile -ProfileName $SelectedProfileName
         return $false
     }
     else {
@@ -411,20 +429,6 @@ function Test-AtlassianPowerKitProfile {
         throw 'Atlassian Cloud API Auth test failed.'
     }
     Write-Debug "Atlassian Cloud Auth test returned: $($REST_RESULTS.displayName) --- OK!"
-
-    # Test Opsgenie API if profile uses Opsgenie API
-    if ($env:AtlassianPowerKit_UseOpsgenieAPI) {
-        try {
-            Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_OpsgenieAPIEndpoint)/v1/services?limit=1" -Headers $($env:AtlassianPowerKit_OpsgenieAPIHeaders | ConvertFrom-Json -AsHashtable) -Method Get
-            #Write-Debug (ConvertTo-Json $REST_RESULTS -Depth 10)
-        }
-        catch {
-            Write-Debug 'StatusCode:' $_.Exception.Response.StatusCode.value__
-            Write-Debug 'StatusDescription:' $_.Exception.Response.StatusDescription
-            throw 'Opsgenie API Auth test failed.'
-        }
-        Write-Debug 'Opsgenie Auth test --- OK!'
-    }
 }
 
 function Unlock-Vault {

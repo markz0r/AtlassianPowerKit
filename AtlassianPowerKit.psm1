@@ -73,9 +73,9 @@ function Import-NestedModules {
 
 function Test-OSMHomeDir {
     # If the OSM_HOME environment variable is not set, set it to the current directory.
-    $new_home = $(Get-Item $pwd).FullName | Split-Path -Parent
     if (-not $env:OSM_HOME) {
         Write-Debug "Setting OSM_HOME to $new_home"
+        $new_home = $(Get-Item $pwd).FullName | Split-Path -Parent
         $env:OSM_HOME = $new_home
     }
     # Check the OSM_HOME environment variable directory exists
@@ -84,10 +84,17 @@ function Test-OSMHomeDir {
         Write-Warning "Changing OSM_HOME to $new_home"
         $env:OSM_HOME = $new_home
     }
-    if ($env:OSM_HOME -ne $new_home) {
-        Write-Warn "OSM_HOME is set to $env:OSM_HOME, but the script location indicates it should be $new_home. This may cause issues."
-    }
     $ValidatedOSMHome = (Get-Item $env:OSM_HOME).FullName
+    if (-not $env:OSM_INSTALL) {
+        # if linux, set the default OSM_INSTALL path to /opt/osm
+        if ($IsLinux) {
+            $env:OSM_INSTALL = '/opt/osm'
+        }
+        else {
+            $env:OSM_INSTALL = $(Get-ItemProperty -Path ..\).FullName
+        }
+        
+    }
     return $ValidatedOSMHome
 }
 
@@ -139,7 +146,7 @@ function Show-AtlassianPowerKitFunctions {
     )
     $selectedFunction = $null
     # Remove AtlassianPowerKit-Shard and AtlassianPowerKit-UsersAndGroups from the nested modules
-    $NESTED_MODULES = $NESTED_MODULES | Where-Object { $_ -ne 'AtlassianPowerKit-UsersAndGroups' }
+    $NESTED_MODULES = $NESTED_MODULES | Where-Object { $_ -ne 'AtlassianPowerKit-UsersAndGroups' -and $_ -ne 'AtlassianPowerKit-Shared' }
     # List nested modules and their exported functions to the console in a readable format, grouped by module
     $colors = @('Green', 'Cyan', 'Red', 'Magenta', 'Yellow', 'Blue', 'Gray')
     $colorIndex = 0
@@ -219,28 +226,6 @@ function Show-AtlassianPowerKitFunctions {
     return $SelectedFunctionName
 }
 
-# Function to create a new profile
-function New-AtlassianPowerKitProfile {
-    # Ask user to enter the profile name
-    $ProfileName = Read-Host 'Enter a profile name:'
-    $ProfileName = $ProfileName.ToLower().Trim()
-    if (!$ProfileName -or $ProfileName -eq '' -or $ProfileName.Length -gt 100) {
-        Write-Error 'Profile name cannot be empty, or more than 100 characters, Please try again.'
-        # Load the selected profile or create a new profile
-        Write-Debug "Profile name entered: $ProfileName"
-        Throw 'Profile name cannot be empty, taken or mor than 100 characters, Please try again.'
-    }
-    else {
-        try {
-            Register-AtlassianPowerKitProfile($ProfileName)       
-        }
-        catch {
-            Write-Debug "Error: $($_.Exception.Message)"
-            throw "Register-AtlassianPowerKitProfile $ProfileName failed. Exiting."
-        }
-    }
-}
-
 # Function to list availble profiles with number references for interactive selection or 'N' to create a new profile
 function Show-AtlassianPowerKitProfileList {
     #Get-AtlassianPowerKitProfileList
@@ -248,7 +233,8 @@ function Show-AtlassianPowerKitProfileList {
     $profileIndex = 0
     if (!$PROFILE_LIST) {
         Write-Host 'Please create a new profile.'
-        New-AtlassianPowerKitProfile
+        $REGISTERED_PROFILE = New-AtlassianPowerKitProfile
+        return $REGISTERED_PROFILE
         #Write-Debug "Profile List: $(Get-AtlassianPowerKitProfileList)"
         #Show-AtlassianPowerKitProfileList
     } 
@@ -305,7 +291,7 @@ function AtlassianPowerKit {
         [Parameter(Mandatory = $false)]
         [string] $FunctionName,
         [Parameter(Mandatory = $false)]
-        [hashtable] $FunctionParameterHashTable,
+        [hashtable] $FunctionParameters,
         [Parameter(Mandatory = $false)]
         [switch] $ClearProfile
     )
@@ -337,7 +323,7 @@ function AtlassianPowerKit {
             $ProfileName = $Profile.Trim().ToLower()
         }
         if (!$ProfileName) {
-            $ProfileName = $(Show-AtlassianPowerKitProfileList)
+            $ProfileName = Show-AtlassianPowerKitProfileList
         }
         $CURRENT_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $ProfileName
         Write-Debug "Profile set to: $CURRENT_PROFILE"
@@ -346,13 +332,13 @@ function AtlassianPowerKit {
         }
         # If function parameters are provided, splat them to the function
         Write-Debug "AtlassianPowerKit Main - Running function: $FunctionName, with profile: $CURRENT_PROFILE"
-        if ($FunctionParameterHashTable) {
+        if ($FunctionParameters) {
             Write-Debug '   Parameters provided to the function via hashtable:'
             # Iterate through the hashtable and display the key value pairs as "-key value"
-            $FunctionParameterHashTable.GetEnumerator() | ForEach-Object {
+            $FunctionParameters.GetEnumerator() | ForEach-Object {
                 Write-Debug "       -$($_.Key) $_.Value"
             }
-            Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName -FunctionParameters $FunctionParameterHashTable
+            Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName -FunctionParameters $FunctionParameters
         }
         elseif ($FunctionName) {
             Write-Debug "AtlassianPowerKit Main: No parameters provided to the function, attempting to run the function without parameters: $FunctionName"

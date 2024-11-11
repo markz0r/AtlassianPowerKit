@@ -19,6 +19,18 @@ AtlassianPowerKit
 AtlassianPowerKitFunction -FunctionName "Get-JiraIssue" -FunctionParameters @{"Key"="TEST-1"} -Profile "zoak"
 ```
 
+```docker
+# Windows
+mkdir .\osm_home
+docker run --rm -v ${PWD}\osm_home:/mnt/osm -v "$Env:LOCALAPPDATA\Microsoft\PowerShell\secretmanagement\:/root/.secretmanagement/" -it markz0r/atlassian-powerkit:latest
+
+# Linux
+mkdir ./osm_home
+docker run -it --rm -v ${PWD}/osm_home:/mnt/osm -v "$HOME/.local/share/powershell/secretmanagement/ "
+```
+
+```powershell
+
 ## Prerequisites
 
 - Windows PowerShell 7.0 or later
@@ -34,3 +46,4 @@ See [LICENSE](LICENSE.md) file.
 ## Disclaimer
 
 This module is provided as-is without any warranty or support. Use it at your own risk.
+```
