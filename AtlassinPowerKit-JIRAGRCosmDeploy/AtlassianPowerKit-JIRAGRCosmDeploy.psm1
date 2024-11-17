@@ -17,3 +17,14 @@ GitHub: https://github.com/OrganisationServiceManagement/AtlassianPowerKit.git
 #>
 
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
+
+# Listing issue Types
+function Get-MarkDownJIRAIssueTypes {
+    param (
+        [P ]
+        [Parameter(Mandatory = $false)]
+        [string]$OUTPUT_PATH = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA"
+    )
+}
+
+Get-Content .\cpk-HROSM-IssueTypes-20241117-145239.json | ConvertFrom-Json -Depth 100 | ForEach-Object { Write-Host "- [$($_.Name)]($($_.self)) - [Show All Instances](https://cpksystems.atlassian.net/jira/servicedesk/projects/HROSM/issues/?jql=project%20%3D%20HROSM%20AND%20issuetype%20%3D%20%22$($_.name.replace(' ','%20'))%22)" 

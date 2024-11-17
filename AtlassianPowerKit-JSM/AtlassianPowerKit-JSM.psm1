@@ -41,11 +41,17 @@ function Get-JiraServiceDeskRequestTypes {
         [Parameter(Mandatory = $false)]
         [string]$OUTPUT_PATH = "$($env:OSM_HOME)\$($env:AtlassianPowerKit_PROFILE_NAME)\JIRA"
     )
-    $FILENAME = "$env:AtlassianPowerKit_PROFILE_NAME-$PROJECT_KEY-IssueTypeSchema-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
-    $REQUEST_TYPES = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_JiraCloudInstance)/rest/servicedeskapi/servicedesk/$PROJECT_KEY/requesttype" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+    $FILENAME = "$env:AtlassianPowerKit_PROFILE_NAME-$PROJECT_KEY-RequestTypeSchema-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+    $REQUEST_TYPE_ARRAY = @()
+    $REQUEST_TYPES = Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/rest/servicedeskapi/servicedesk/$PROJECT_KEY/requesttype" -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+    $REQUEST_TYPE_ARRAY += $REQUEST_TYPES.values
+    while (! $REQUEST_TYPES.isLastPage) {
+        $REQUEST_TYPES = Invoke-RestMethod -Uri $REQUEST_TYPES._links.next -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method Get -ContentType 'application/json'
+        $REQUEST_TYPE_ARRAY += $REQUEST_TYPES.values
+    }
     $REQUEST_TYPES | ConvertTo-Json -Depth 50 | Out-File -FilePath "$OUTPUT_PATH\$FILENAME"
     Write-Debug "REQUEST_TYPES [$PROJECT_KEY] written to $OUTPUT_PATH\$FILENAME"
-    Return $REQUEST_TYPES
+    Return $REQUEST_TYPES | ConvertTo-Json -Depth 100 -Compress
 }
 
 # Function to get All Request Types from Jira Cloud JSM project

@@ -98,6 +98,35 @@ function Test-OSMHomeDir {
     return $ValidatedOSMHome
 }
 
+# function Invoke-AtlassianPowerKitFunction {
+#     param (
+#         [Parameter(Mandatory = $true)]
+#         [string] $FunctionName,
+#         [Parameter(Mandatory = $false)]
+#         [hashtable] $FunctionParameters
+#     )
+#     $TEMP_DIR = "$env:OSM_HOME\$env:AtlassianPowerKit_PROFILE_NAME\.temp"
+#     if (-not (Test-Path $TEMP_DIR)) {
+#         New-Item -ItemType Directory -Path $TEMP_DIR -Force | Out-Null
+#     }
+#     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+#     $stopwatch.Start() | Out-Null
+#     if ($FunctionParameters) {
+#         $singleLineDefinition = $FunctionParameters.Keys | ForEach-Object { "-   ->    $_ = $($FunctionParameters.($_))" }
+#         Write-Debug "Running function: $FunctionName with parameters: $singleLineDefinition"
+#         # Run the function with the parameters and capture the returned object
+#         $RETURN_OBJECT = $FunctionName @FunctionParameters | ConvertTo-Json -Depth 100 -Compress -EnumsAsStrings
+#     }
+#     else {
+#         $RETURN_OBJECT = $(Invoke-Expression "$FunctionName")
+#     }
+#     $stopwatch.Stop() | Out-Null
+#     Write-Debug "Function $FunctionName completed - execution time: $($stopwatch.Elapsed.TotalSeconds) seconds"
+#     $RETURN_JSON = $RETURN_OBJECT | ConvertTo-Json -Depth 100 -Compress
+#     Write-Debug "Returning JSON of size: $($RETURN_JSON.Length) characters"
+#     #$RETURN_JSON | ConvertTo-Json -Depth 50 | Write-Debug
+#     return $RETURN_JSON
+# }
 function Invoke-AtlassianPowerKitFunction {
     param (
         [Parameter(Mandatory = $true)]
@@ -109,23 +138,38 @@ function Invoke-AtlassianPowerKitFunction {
     if (-not (Test-Path $TEMP_DIR)) {
         New-Item -ItemType Directory -Path $TEMP_DIR -Force | Out-Null
     }
-    $TIMESTAMP = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $LOG_FILE = "$TEMP_DIR\$FunctionName-$TIMESTAMP.log"
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    $stopwatch.Start()
-    if ($FunctionParameters) {
-        $singleLineDefinition = $FunctionParameters.Keys | ForEach-Object { "-   ->    $_ = $($FunctionParameters.($_))" }
-        Write-Debug "Running function: $FunctionName with parameters: $singleLineDefinition"
-        & $FunctionName @FunctionParameters
+    $stopwatch.Start() | Out-Null
+
+    try {
+        if ($FunctionParameters) {
+            # Safely construct a debug message with hashtable keys and values
+            $singleLineDefinition = $FunctionParameters.Keys | ForEach-Object { '- ' + $_ + ": $($FunctionParameters[$_])" }
+            Write-Debug "Running function: $FunctionName with parameters: $singleLineDefinition"
+
+            # Use Splatting (@) to pass parameters
+            $RETURN_OBJECT = & $FunctionName @FunctionParameters
+        }
+        else {
+            Write-Debug "Running function: $FunctionName without parameters"
+            $RETURN_OBJECT = & $FunctionName
+        }
+
+        # Stop timing the function execution
+        $stopwatch.Stop() | Out-Null
+        Write-Debug "Function $FunctionName completed - execution time: $($stopwatch.Elapsed.TotalSeconds) seconds"
+
+        # Convert the returned object to JSON
+        $RETURN_JSON = $RETURN_OBJECT
+        Write-Debug "Returning JSON of size: $($RETURN_JSON.Length) characters"
     }
-    else {
-        Invoke-Expression "$FunctionName" 
+    catch {
+        Write-Debug "Error occurred while invoking function: $FunctionName"
+        Write-Debug $_
+        $RETURN_JSON = "{'error': 'An error occurred while executing the function.', 'details': '$($_.Exception.Message)'}"
     }
-    $stopwatch.Stop()
-    Write-Output "Function $FunctionName completed - execution time: $($stopwatch.Elapsed.TotalSeconds) seconds"
-    Write-Output "Log file: $LOG_FILE"
-    Write-Output 'To run again, use the command: '
-    Write-Output "Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName -FunctionParameters @{ $singleLineDefinition }"
+
+    return $RETURN_JSON
 }
 
 function Show-AdminFunctions {
@@ -306,15 +350,15 @@ function AtlassianPowerKit {
         Write-Debug "OSM_HOME: $(Test-OSMHomeDir)"
         # If current directory is not the script root, push the script root to the stack
         if ($ResetVault) {
-            Clear-AtlassianPowerKitVault
+            Clear-AtlassianPowerKitVault | Out-Null
             return $true
         }
         if ($ArchiveProfileDirs) {
-            Clear-AtlassianPowerKitProfileDirs
+            Clear-AtlassianPowerKitProfileDirs | Out-Null
             return $true
         }
         if ($ClearProfile) {
-            Clear-AtlassianPowerKitProfile
+            Clear-AtlassianPowerKitProfile | Out-Null
             return $true
         }
         # If no profile name is provided, list the available profiles
@@ -338,11 +382,13 @@ function AtlassianPowerKit {
             $FunctionParameters.GetEnumerator() | ForEach-Object {
                 Write-Debug "       -$($_.Key) $_.Value"
             }
-            Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName -FunctionParameters $FunctionParameters
+            $RETURN_JSON = $(Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName -FunctionParameters $FunctionParameters)
+            Write-Debug "AtlassianPowerKit Main: Received JSON of size: $($RETURN_JSON.Length) characters"
         }
         elseif ($FunctionName) {
             Write-Debug "AtlassianPowerKit Main: No parameters provided to the function, attempting to run the function without parameters: $FunctionName"
-            Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName
+            $RETURN_JSON = $(Invoke-AtlassianPowerKitFunction -FunctionName $FunctionName)
+            Write-Debug "AtlassianPowerKit Main: Received JSON of size: $($RETURN_JSON.Length) characters"
         }
     }
     catch {
@@ -353,10 +399,12 @@ function AtlassianPowerKit {
         Write-Debug '++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ AtlassianPowerKit Main: '
         Write-Error $_.Exception.Message
     }
-    finally {
-        #Clear-AtlassianPowerKitProfile
-        Pop-Location
-        #Remove-Item 'env:AtlassianPowerKit_*' -ErrorAction Continue
-        Write-Debug 'Gracefully exited AtlassianPowerKit'
-    }
+    # finally {
+    #     #Clear-AtlassianPowerKitProfile
+    #     #Pop-Location
+    #     #Remove-Item 'env:AtlassianPowerKit_*' -ErrorAction Continue
+    #     #Write-Debug 'Gracefully exited AtlassianPowerKit'
+    # }
+    $RETURN_JSON | ConvertFrom-Json -Depth 100 | ConvertTo-Json -Depth 100 -Compress | Write-Debug
+    $RETURN_JSON
 }

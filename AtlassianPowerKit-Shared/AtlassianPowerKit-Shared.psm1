@@ -369,45 +369,53 @@ function Set-AtlassianPowerKitProfile {
         [Parameter(Mandatory = $true)]
         [string]$SelectedProfileName
     )
-    Write-Debug "Set-AtlassianPowerKitProfile - with: $SelectedProfileName ..."
-    # Load all profiles from the secret vault
-    if (!$(Get-SecretVault -Name $script:VAULT_NAME -ErrorAction SilentlyContinue)) {
-        Register-AtlassianPowerKitVault
-    }
-    # Check if the profile exists
-    $PROFILE_LIST = Get-AtlassianPowerKitProfileList
-    if (!$PROFILE_LIST.Contains($SelectedProfileName)) {
-        Write-Debug "Profile $SelectedProfileName does not exists in the vault - we have: $PROFILE_LIST, creating... $SelectedProfileName"
-        New-AtlassianPowerKitProfile -ProfileName $SelectedProfileName
-        return $false
+    if ($SelectedProfileName -eq $env:AtlassianPowerKit_PROFILE_NAME) {
+        Write-Debug "$SelectedProfileName is already loaded."
+        return $env:AtlassianPowerKit_PROFILE_NAME
     }
     else {
-        Write-Debug "Profile $SelectedProfileName exists in the vault, loading..."
-        try {
-            # if vault is locked, unlock it
-            Unlock-Vault -VaultName $script:VAULT_NAME
-            $PROFILE_DATA = (Get-Secret -Name $SelectedProfileName -Vault $script:VAULT_NAME -AsPlainText)
-            #Create environment variables for each item in the profile data
-            $PROFILE_DATA.GetEnumerator() | ForEach-Object {
-                Write-Debug "Setting environment variable: $($_.Key) = $($_.Value)"
-                # Create environment variable concatenated with AtlassianPowerKit_ prefix
-                $SetEnvar = '$env:AtlassianPowerKit_' + $_.Key + " = `"$($_.Value)`""
-                Invoke-Expression -Command $SetEnvar | Out-Null
-                Write-Debug "Environment variable set: $SetEnvar"
-            }
-        } 
-        catch {
-            Write-Debug "Failed to load profile $SelectedProfileName. Please check the vault key file."
-            throw "Failed to load profile $SelectedProfileName. Please check the vault key file."
+        Write-Debug "$SelectedProfileName not loaded, loading..."
+        # Load all profiles from the secret vault
+        if (!$(Get-SecretVault -Name $script:VAULT_NAME -ErrorAction SilentlyContinue)) {
+            Register-AtlassianPowerKitVault
         }
-        Set-AtlassianAPIHeaders
-        #Set-OpsgenieAPIHeaders
-        $env:AtlassianPowerKit_CloudID = $(Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/_edge/tenant_info").cloudId
-        Write-Debug "Profile $SelectedProfileName loaded successfully."
+        # Check if the profile exists
+        $PROFILE_LIST = Get-AtlassianPowerKitProfileList
+        if (!$PROFILE_LIST.Contains($SelectedProfileName)) {
+            Write-Debug "Profile $SelectedProfileName does not exists in the vault - we have: $PROFILE_LIST, creating... $SelectedProfileName"
+            New-AtlassianPowerKitProfile -ProfileName $SelectedProfileName
+            return $false
+        }
+        else {
+            Write-Debug "Profile $SelectedProfileName exists in the vault, loading..."
+            try {
+                # if vault is locked, unlock it
+                Unlock-Vault -VaultName $script:VAULT_NAME
+                $PROFILE_DATA = (Get-Secret -Name $SelectedProfileName -Vault $script:VAULT_NAME -AsPlainText)
+                #Create environment variables for each item in the profile data
+                $PROFILE_DATA.GetEnumerator() | ForEach-Object {
+                    Write-Debug "Setting environment variable: $($_.Key) = $($_.Value)"
+                    # Create environment variable concatenated with AtlassianPowerKit_ prefix
+                    $SetEnvar = '$env:AtlassianPowerKit_' + $_.Key + " = `"$($_.Value)`""
+                    Invoke-Expression -Command $SetEnvar | Out-Null
+                    Write-Debug "Environment variable set: $SetEnvar"
+                }
+            } 
+            catch {
+                Write-Debug "Failed to load profile $SelectedProfileName. Please check the vault key file."
+                throw "Failed to load profile $SelectedProfileName. Please check the vault key file."
+            }
+            Set-AtlassianAPIHeaders
+            #Set-OpsgenieAPIHeaders
+            $env:AtlassianPowerKit_CloudID = $(Invoke-RestMethod -Uri "https://$($env:AtlassianPowerKit_AtlassianAPIEndpoint)/_edge/tenant_info").cloudId
+            Write-Debug "Profile $SelectedProfileName loaded successfully."
+        }
+        $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile
+        return $LOADED_PROFILE
     }
-    $LOADED_PROFILE = Get-CurrentAtlassianPowerKitProfile
-    return $LOADED_PROFILE
+    return $false
 }
+
 
 
 # Function to test if AtlassianPowerKit profile authenticates successfully
