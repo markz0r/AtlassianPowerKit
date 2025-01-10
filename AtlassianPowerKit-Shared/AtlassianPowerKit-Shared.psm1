@@ -36,6 +36,7 @@ GitHub: https://github.com/markz0r/AtlassianPowerKit
 $ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 $VAULT_NAME = 'AtlassianPowerKitProfileVault'
 $VAULT_KEY_PATH = "$($env:OSM_HOME)\vault_key.xml"
+$RETRY_AFTER = 60
 
 function Clear-AtlassianPowerKitProfile {
     # Clear all environment variables starting with AtlassianPowerKit_
@@ -102,6 +103,91 @@ function Get-CurrentAtlassianPowerKitProfile {
         Write-Debug 'No profile loaded.'
         return $false
     }
+}
+function Get-PaginatedJSONResults {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$URI,
+        [Parameter(Mandatory = $true)]
+        [string]$METHOD,
+        [Parameter(Mandatory = $false)]
+        [string]$POST_BODY,
+        [Parameter(Mandatory = $false)]
+        [string]$RESPONSE_JSON_OBJECT_FILTER_KEY,
+        [Parameter(Mandatory = $false)]
+        [string]$API_HEADERS = $env:AtlassianPowerKit_AtlassianAPIHeaders
+    )
+    
+    function Get-PageResult {
+        param (
+            [Parameter(Mandatory = $true)]
+            [string]$URI,
+            [Parameter(Mandatory = $false)]
+            [string]$METHOD = 'GET',
+            [Parameter(Mandatory = $false)]
+            [string]$ONE_POST_BODY
+        )
+        try {
+            if ($METHOD -eq 'POST') {
+                $PAGE_RESULTS = Invoke-RestMethod -Uri $URI -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method $METHOD -Body $ONE_POST_BODY -ContentType 'application/json'
+            }
+            else {
+                $PAGE_RESULTS = Invoke-RestMethod -Uri $URI -Headers $(ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders) -Method $METHOD -ContentType 'application/json'
+                #$PAGE_RESULTS | ConvertTo-Json -Depth 100 | Write-Debug
+            }
+        }
+        catch {
+            # Catch 429 errors and wait for the retry-after time
+            if ($_.Exception.Response.StatusCode -eq 429) {
+                Write-Warn "429 error, waiting for $RETRY_AFTER seconds..."
+                Start-Sleep -Seconds $RETRY_AFTER
+                Get-PageResult -URI $URI -ONE_POST_BODY $ONE_POST_BODY
+            }
+            else {
+                Write-Error "Error: $($_.Exception.Message)"
+                throw 'Get-PageResult failed'
+            }
+        }
+        if ($PAGE_RESULTS.isLast -eq $false) {
+            # if PAGE_RESULTS has a value for key 'nextPageToken' then set it 
+            #Write-Debug 'More pages to get, getting next page...'
+            if ($PAGE_RESULTS.nextPageToken) {
+                #Write-Debug "Next page token: $($PAGE_RESULTS.nextPageToken)"
+                # Update if the method is POST, update the ONE_POST_BODY with the nextPageToken
+                if ($METHOD -eq 'POST') {
+                    $ONE_POST_BODY = $ONE_POST_BODY | ConvertFrom-Json
+                    $ONE_POST_BODY.nextPageToken = $PAGE_RESULTS.nextPageToken
+                    #$ONE_POST_BODY = $ONE_POST_BODY | ConvertTo-Json
+                }
+                else {
+                    $URI = $URI + "&nextPageToken=$($PAGE_RESULTS.nextPageToken)"
+                }
+            }
+            elseif ($PAGE_RESULTS.nextPage) {
+                Write-Debug "Next page: $($PAGE_RESULTS.nextPage)"
+                if ($METHOD -eq 'POST') {
+                    Write-Error "$($MyInvocation.MyCommand) does not support POST method with nextPage. Exiting..."
+                }
+                else {
+                    $URI = $PAGE_RESULTS.nextPage
+                }
+            }
+            Get-PageResult -URI $URI -METHOD $METHOD
+        }
+        if ($RESPONSE_JSON_OBJECT_FILTER_KEY) {
+            $PAGE_RESULTS = $PAGE_RESULTS.$RESPONSE_JSON_OBJECT_FILTER_KEY
+        }
+        $PAGE_RESULTS
+    }
+    if ($POST_BODY) {
+        $RESULTS_ARRAY = Get-PageResult -URI $URI -METHOD $METHOD -ONE_POST_BODY $POST_BODY
+    }
+    else {
+        $RESULTS_ARRAY = Get-PageResult -URI $URI -METHOD $METHOD
+    }
+    Write-Debug "$($MyInvocation.MyCommand) results:"
+    # $RESULTS_ARRAY | ConvertTo-Json -Depth 100 -Compress | Write-Debug
+    return $RESULTS_ARRAY | ConvertTo-Json -Depth 100 -Compress
 }
 
 function Get-AtlassianPowerKitProfileList {
@@ -341,7 +427,6 @@ function Register-AtlassianPowerKitProfile {
     $LOADED_PROFILE = Set-AtlassianPowerKitProfile -SelectedProfileName $ProfileName
     return $LOADED_PROFILE
 }
-
 # Function to set the Atlassian Cloud API headers
 function Set-AtlassianAPIHeaders {
     # check if there is a profile loaded
@@ -421,7 +506,7 @@ function Set-AtlassianPowerKitProfile {
 # Function to test if AtlassianPowerKit profile authenticates successfully
 function Test-AtlassianPowerKitProfile {
     Write-Debug 'Testing Atlassian Cloud PowerKit Profile...'
-    #Write-Debug "API Headers: $($script:AtlassianAPIHeaders | Format-List * | Out-String)"
+    #Write-Debug "API Headers: $($script:AtlassianAPIHeaders | Format-List * | Out-String)'
     Write-Debug "API Endpoint: $($env:AtlassianPowerKit_AtlassianAPIEndpoint) ..."
     Write-Debug "API Headers: $($env:AtlassianPowerKit_AtlassianAPIHeaders) ..."
     $HEADERS = ConvertFrom-Json -AsHashtable $env:AtlassianPowerKit_AtlassianAPIHeaders

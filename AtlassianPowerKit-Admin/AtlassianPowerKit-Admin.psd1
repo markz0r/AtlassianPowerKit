@@ -9,7 +9,7 @@
 @{
 
     # Script module or binary module file associated with this manifest.
-    RootModule        = 'AtlassianPowerKit-JIRAGRCosmDeploy.psm1'
+    RootModule        = 'AtlassianPowerKit-Admin.psm1'
 
     # Version number of this module.
     ModuleVersion     = '1.0.0'
@@ -18,7 +18,7 @@
     # CompatiblePSEditions = @()
 
     # ID used to uniquely identify this module
-    GUID              = 'c5cbd86b-5b61-45e9-b4b9-4e30d2144270'
+    GUID              = 'c93fe103-590b-4a69-b4e1-09fcc140ef99'
 
     # Author of this module
     Author            = 'Mark Culhane'
@@ -70,11 +70,16 @@
 
     # Functions to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no functions to export.
     FunctionsToExport = @(
-        'Get-SharePointFileMetadata',
-        'New-ConfluencePolicyViewerSharePoint',
-        'Get-OSMPlaceholdersJira',
-        'Get-OSMPlaceholdersConfluence',
-        'Update-GRCosmConfRegister'
+        'New-JiraIssueType',
+        'Import-JiraIssueTypes',
+        'Test-ExistingConfigJSON',
+        'Import-JSONConfigExport',
+        'Get-OSMDeploymentConfigsJIRA',
+        'Get-OSMConfigAsMarkdown',
+        'Get-JiraProjectIssueTypes',
+        'Get-JiraCloudIssueTypeSchema'
+        'Get-JiraCloudIssueTypeMetadata',
+        'Get-JiraOSMFilterList'
     )
 
     # Cmdlets to export from this module, for best performance, do not use wildcards and do not delete the entry, use an empty array if there are no cmdlets to export.

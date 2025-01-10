@@ -74,6 +74,7 @@
         'Clear-AtlassianPowerKitProfileDirs',
         'Clear-AtlassianPowerKitVault',
         'Get-AtlassianPowerKitProfileList',
+        'Get-PaginatedJSONResults',
         'Get-CurrentAtlassianPowerKitProfile',
         'Get-LevenshteinDistance',
         'Get-PopulatedTemplate',

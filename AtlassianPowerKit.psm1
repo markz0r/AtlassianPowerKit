@@ -1,3 +1,4 @@
+$ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 <#
 .SYNOPSIS
     Atlassian Cloud PowerKit module for interacting with Atlassian Cloud REST API.
@@ -20,7 +21,6 @@
     GitHub:
 
 #>
-$ErrorActionPreference = 'Stop'; $DebugPreference = 'Continue'
 function Get-RequisitePowerKitModules {
     $AtlassianPowerKitRequiredModules = @('PowerShellGet', 'Microsoft.PowerShell.SecretManagement', 'Microsoft.PowerShell.SecretStore')
     $AtlassianPowerKitRequiredModules | ForEach-Object {
@@ -98,35 +98,6 @@ function Test-OSMHomeDir {
     return $ValidatedOSMHome
 }
 
-# function Invoke-AtlassianPowerKitFunction {
-#     param (
-#         [Parameter(Mandatory = $true)]
-#         [string] $FunctionName,
-#         [Parameter(Mandatory = $false)]
-#         [hashtable] $FunctionParameters
-#     )
-#     $TEMP_DIR = "$env:OSM_HOME\$env:AtlassianPowerKit_PROFILE_NAME\.temp"
-#     if (-not (Test-Path $TEMP_DIR)) {
-#         New-Item -ItemType Directory -Path $TEMP_DIR -Force | Out-Null
-#     }
-#     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-#     $stopwatch.Start() | Out-Null
-#     if ($FunctionParameters) {
-#         $singleLineDefinition = $FunctionParameters.Keys | ForEach-Object { "-   ->    $_ = $($FunctionParameters.($_))" }
-#         Write-Debug "Running function: $FunctionName with parameters: $singleLineDefinition"
-#         # Run the function with the parameters and capture the returned object
-#         $RETURN_OBJECT = $FunctionName @FunctionParameters | ConvertTo-Json -Depth 100 -Compress -EnumsAsStrings
-#     }
-#     else {
-#         $RETURN_OBJECT = $(Invoke-Expression "$FunctionName")
-#     }
-#     $stopwatch.Stop() | Out-Null
-#     Write-Debug "Function $FunctionName completed - execution time: $($stopwatch.Elapsed.TotalSeconds) seconds"
-#     $RETURN_JSON = $RETURN_OBJECT | ConvertTo-Json -Depth 100 -Compress
-#     Write-Debug "Returning JSON of size: $($RETURN_JSON.Length) characters"
-#     #$RETURN_JSON | ConvertTo-Json -Depth 50 | Write-Debug
-#     return $RETURN_JSON
-# }
 function Invoke-AtlassianPowerKitFunction {
     param (
         [Parameter(Mandatory = $true)]
@@ -212,7 +183,7 @@ function Show-AtlassianPowerKitFunctions {
         $colorIndex++
         #Write-Debug $MODULE_NAME
         #Get-Module -Name $MODULE_NAME 
-        $FunctionList = (Get-Module -Name $MODULE_NAME).ExportedFunctions.Keys
+        $FunctionList = (Get-Module -Name $MODULE_NAME -All).ExportedFunctions.Keys
         $FunctionList | ForEach-Object {
             $functionReferences += $_
             Write-Host ' ' -NoNewline -BackgroundColor "Dark$color"
@@ -343,7 +314,7 @@ function AtlassianPowerKit {
         $env:AtlassianPowerKit_RequisiteModules = Get-RequisitePowerKitModules
         Write-Debug 'AtlassianPowerKit_RequisiteModules - Required modules imported'
     }
-    $NESTED_MODULES = Import-NestedModules -NESTED_MODULES @('AtlassianPowerKit-Shared', 'AtlassianPowerKit-Jira', 'AtlassianPowerKit-Confluence', 'AtlassianPowerKit-GRCosm', 'AtlassianPowerKit-JSM', 'AtlassianPowerKit-UsersAndGroups')
+    $NESTED_MODULES = Import-NestedModules -NESTED_MODULES @('AtlassianPowerKit-Shared', 'AtlassianPowerKit-Jira', 'AtlassianPowerKit-Confluence', 'AtlassianPowerKit-GRCosm', 'AtlassianPowerKit-JSM', 'AtlassianPowerKit-UsersAndGroups', 'AtlassianPowerKit-Admin')
     try {
         #Push-Location -Path $PSScriptRoot -ErrorAction Continue
         Write-Debug "Starting AtlassianPowerKit, running from $((Get-Item -Path $PSScriptRoot).FullName)"
