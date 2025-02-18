@@ -6,7 +6,7 @@
 
 ```powershell
 git clone https://github.com/OrganisationServiceManagement/AtlassianPowerKit.git
-cd .\AtlassianPowerKit; Import-Module "AtlassianPowerKit.psd1"
+cd .\AtlassianPowerKit; Import-Module ".\AtlassianPowerKit.psd1"
 AtlassianPowerKit
 ```
 
